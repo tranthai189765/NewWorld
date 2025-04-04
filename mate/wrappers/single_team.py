@@ -9,6 +9,7 @@ import numpy as np
 from mate.agents.base import CameraAgentBase, TargetAgentBase
 from mate.utils import Message, Team
 
+
 # pylint: disable-next=cyclic-import
 from mate.wrappers.typing import (
     AgentType,
@@ -262,6 +263,14 @@ class SingleTeamMultiAgent(SingleTeamHelper):
             done = done[0]
 
         return joint_observation, reward, done, infos
+
+    def get_real_opponent_info(self):
+        res = []
+
+        for target in self.opponent_joint_observation:
+            res.append(target[13:27])
+
+        return res
 
     def seed(self, seed: Optional[int] = None) -> List[int]:
         seeds = self.env.seed(seed)

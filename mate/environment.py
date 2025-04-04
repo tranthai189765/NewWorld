@@ -697,8 +697,7 @@ class MultiAgentTracking(gym.Env, EzPickle, metaclass=EnvMeta):
 
         self._destroy()
 
-        if seed is not None:
-            self.seed(seed)
+        self.seed(seed)
 
         self.cameras = list(self.cameras_ordered)
         self.targets = list(self.targets_ordered)

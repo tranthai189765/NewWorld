@@ -17,6 +17,9 @@ if 'Apple' in sys.version and 'DYLD_FALLBACK_LIBRARY_PATH' in os.environ:
 
 try:
     import pyglet
+
+    from pyglet.window import key
+    keys = key.KeyStateHandler()
 except ImportError as e:
     raise ImportError(
         """\
@@ -85,6 +88,12 @@ class Viewer:
         self.height = height
         self.window = get_window(width=width, height=height, display=display)
         self.window.on_close = self.window_closed_by_user
+
+        @self.window.event
+        def on_key_press(symbol, modifiers):
+            if symbol in [113, 65307]:
+                self.close()
+        
         self.isopen = True
         self.geoms = []
         self.onetime_geoms = []
@@ -115,7 +124,7 @@ class Viewer:
 
     def add_onetime(self, geom):
         self.onetime_geoms.append(geom)
-
+    
     def render(self, return_rgb_array=False):
         glClearColor(1, 1, 1, 1)
         self.window.clear()

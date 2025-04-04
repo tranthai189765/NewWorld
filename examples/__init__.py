@@ -6,8 +6,7 @@
 # isort: off
 
 # Rule-based agents
-from examples import random, naive, greedy, heuristic
+from examples import greedy
 
 # Learning-based agents
-from examples import iql, ippo, maddpg, mappo, qmix, hrl
-from examples import i2c, tarmac
+
