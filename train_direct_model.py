@@ -8,7 +8,7 @@ import os
 from direct_model import WorldModel  # Import mô hình của bạn
 
 # Load dataset
-dataset = torch.load("10k_dataset_modified_labels.pt")
+dataset = torch.load("dataset/10k_dataset_modified_labels3.pt")
 
 # Lấy từng phần dữ liệu
 inputs_cameras = torch.tensor(dataset["inputs"]["cameras"], dtype=torch.float32)

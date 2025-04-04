@@ -48,7 +48,7 @@ class WorldModel(nn.Module):
         self.prediction_head = nn.Sequential(
             nn.Linear(embed_dim, 32),
             nn.ReLU(),
-            nn.Linear(32, 4),
+            nn.Linear(32, 5),
             nn.Softmax(dim=-1)
         )
         self.encoder_camera = EncodeLinear(45, embed_dim)
@@ -80,3 +80,18 @@ class WorldModel(nn.Module):
         future_states = self.prediction_head(targets)  # Dự đoán state tương lai
         return future_states
 
+
+# Tạo dữ liệu input mẫu
+batch_size = 2
+# targets: (batch_size, 8, 20)
+targets = torch.randn(batch_size, 8, 20)
+# obstacles: (batch_size, 9, 3)
+obstacles = torch.randn(batch_size, 9, 3)
+# cameras: (batch_size, 4, 45)
+cameras = torch.randn(batch_size, 4, 45)
+
+# Khởi tạo model và chạy forward
+model = WorldModel()
+output = model(targets, obstacles, cameras)
+print("Output shape:", output.shape)  # Dự kiến (2, 8, 4)
+print("Output one-hot vectors:\n", output)
