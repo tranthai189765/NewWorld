@@ -1,6 +1,6 @@
 import torch
 # Load dataset từ file
-dataset = torch.load("10k_dataset_modified.pt")  # Thay bằng tên file thực tế
+dataset = torch.load("mate/dataset/10k_dataset_modified_labels.pt")  # Thay bằng tên file thực tế
 
 # Kiểm tra keys (nếu lưu dưới dạng dictionary)
 print(dataset.keys())
