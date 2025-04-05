@@ -13,7 +13,7 @@ from buffer.obstacle_buffer import ObstacleBuffer as b_o
 from buffer.camera_buffer import CameraBuffer as b_c
 
 MAX_EPISODE_STEPS = 4000
-MAX_EPISODES = 500
+MAX_EPISODES = 4500
 num_dataset = 0
 def main():
     num_label = 0

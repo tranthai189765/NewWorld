@@ -10,7 +10,7 @@ import datetime
 import time
 
 # Load dataset
-dataset = torch.load("dataset_4v4/10k_dataset_modified.pt")
+dataset = torch.load("dataset_4v4/75k_dataset_modified.pt")
 
 # Lấy từng phần dữ liệu
 inputs_cameras = torch.tensor(dataset["inputs"]["cameras"], dtype=torch.float32)
@@ -29,7 +29,7 @@ test_size = len(full_dataset) - train_size - valid_size
 train_dataset, valid_dataset, test_dataset = random_split(full_dataset, [train_size, valid_size, test_size])
 
 # DataLoader
-batch_size = 1
+batch_size = 32
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -40,7 +40,7 @@ model = WorldModel().to(device)
 
 # Loss & Optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
 
 # Early Stopping
 early_stopping_patience = 1000000  # Số epoch chờ trước khi dừng nếu không cải thiện

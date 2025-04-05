@@ -54,7 +54,7 @@ class WorldModel(nn.Module):
         self.encoder_target = EncodeLinear(20, embed_dim)
         self.encoder_obstacle = EncodeLinear(3, embed_dim)
         self.encode_env = EncodeLinear(12, embed_dim)
-        env = mate.make('MultiAgentTracking-v0')
+        env =  mate.make('MATE-4v4-0-v0')
         env = mate.MultiCamera(env, target_agent=mate.GreedyTargetAgent(seed=0))
         env_base = env.reset()
         self.env_base = eb_f.collected_infos(env_base)

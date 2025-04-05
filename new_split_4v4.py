@@ -1,7 +1,7 @@
 import torch
 
 # Load file .pt (giả sử nó là dictionary chứa key "labels")
-dataset = torch.load("dataset_4v4/10k_dataset_4v4.pt")
+dataset = torch.load("dataset_4v4/75k_dataset_4v4.pt")
 
 # Lấy tensor labels và chuyển sang float32
 labels = torch.tensor(dataset["labels"], dtype=torch.float32)
@@ -53,4 +53,4 @@ for idx in idx_3:
 dataset["inputs"]["targets"] = targets
 
 # Lưu lại file mới
-torch.save(dataset, "dataset_4v4/10k_dataset_modified.pt")
+torch.save(dataset, "dataset_4v4/75k_dataset_modified.pt")
