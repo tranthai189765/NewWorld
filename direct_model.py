@@ -49,7 +49,6 @@ class WorldModel(nn.Module):
             nn.Linear(embed_dim, 32),
             nn.ReLU(),
             nn.Linear(32, 5),
-            nn.Softmax(dim=-1)
         )
         self.encoder_camera = EncodeLinear(45, embed_dim)
         self.encoder_target = EncodeLinear(20, embed_dim)

@@ -6,6 +6,8 @@ from torch.utils.data import DataLoader, TensorDataset, random_split
 from torch.utils.tensorboard import SummaryWriter
 import os
 from direct_model import WorldModel  # Import mô hình của bạn
+import datetime
+import time
 
 # Load dataset
 dataset = torch.load("dataset_4v4/10k_dataset_modified.pt")
@@ -27,7 +29,7 @@ test_size = len(full_dataset) - train_size - valid_size
 train_dataset, valid_dataset, test_dataset = random_split(full_dataset, [train_size, valid_size, test_size])
 
 # DataLoader
-batch_size = 32
+batch_size = 1
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -51,6 +53,22 @@ if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 writer = SummaryWriter(log_dir)
 
+# Tạo file result.txt trong thư mục dataset
+log_file_path = "dataset/result.txt"
+if not os.path.exists("dataset"):
+    os.makedirs("dataset")
+
+# Ghi log vào file với thời gian
+def log_to_file(message):
+    current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())  # Lấy thời gian hiện tại
+    log_message = f"[{current_time}] {message}"  # Thêm thời gian vào message
+    with open(log_file_path, "a") as f:
+        f.write(log_message + "\n")
+        
+
+# Timelast
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+timelast = timestamp
 # Train model với Early Stopping
 num_epochs = 1000000
 recent_checkpoint_epoch = -1  # Để lưu checkpoint trước epoch cuối cùng
@@ -60,15 +78,21 @@ for epoch in range(num_epochs):
     total_train_loss = 0
  
     for cameras, obstacles, targets, labels_batch in train_loader:
+        # print("old_labels = ", labels_batch)
         cameras, obstacles, targets, labels_batch = (
             cameras.to(device),
             obstacles.to(device),
             targets.to(device),
-            labels_batch.to(device),
+            labels_batch.argmax(dim=2).to(device),
         )
 
         optimizer.zero_grad()
         outputs,_ = model(targets, obstacles, cameras)  # Truyền 3 đầu vào riêng biệt vào WorldModel
+        # print("output = ", outputs, "current label = ", labels_batch)
+        outputs = outputs.view(-1, outputs.size(-1))          # (batch_size * seq_len, num_classes)
+        labels_batch = labels_batch.view(-1)                  # (batch_size * seq_len)
+        # print("output = ", outputs, "current label = ", labels_batch)
+        # time.sleep(10000)
         loss = criterion(outputs, labels_batch)
         loss.backward()
         optimizer.step()
@@ -86,10 +110,12 @@ for epoch in range(num_epochs):
                 cameras.to(device),
                 obstacles.to(device),
                 targets.to(device),
-                labels_batch.to(device),
+                labels_batch.argmax(dim=2).to(device),
             )
 
             outputs,_ = model(targets, obstacles, cameras)
+            outputs = outputs.view(-1, outputs.size(-1))          # (batch_size * seq_len, num_classes)
+            labels_batch = labels_batch.view(-1)                  # (batch_size * seq_len)
             loss = criterion(outputs, labels_batch)
             total_valid_loss += loss.item()
 
@@ -99,14 +125,20 @@ for epoch in range(num_epochs):
     writer.add_scalar("Loss/Train", avg_train_loss, epoch)
     writer.add_scalar("Loss/Validation", avg_valid_loss, epoch)
 
-    print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}")
+    log_message = f"Epoch {epoch+1}/{num_epochs}, Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}"
+    log_to_file(log_message)
+    print(log_message)
 
     # Early Stopping và Lưu checkpoint
     if avg_valid_loss < best_valid_loss:
         best_valid_loss = avg_valid_loss
         patience_counter = 0
-        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {avg_train_loss:.4f}, Best Valid Loss: {avg_valid_loss:.4f} ----- ")
-        torch.save(model.state_dict(), "best_worldmodel.pth")  # Lưu checkpoint tốt nhất
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        timelast = timestamp
+        log_message = f"Epoch {epoch+1}/{num_epochs}, Train Loss: {avg_train_loss:.4f}, Best Valid Loss: {avg_valid_loss:.4f} ----- "
+        log_to_file(log_message)
+        print(log_message)
+        torch.save(model.state_dict(), "best_worldmodel_{timestamp}.pth")  # Lưu checkpoint tốt nhất
     else:
         patience_counter += 1
         if patience_counter >= early_stopping_patience:
@@ -115,16 +147,18 @@ for epoch in range(num_epochs):
 
     # Lưu checkpoint gần nhất (trước epoch cuối)
     if epoch == num_epochs - 2:  # Lưu checkpoint trước epoch cuối
-        torch.save(model.state_dict(), "recent_checkpoint.pth")
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        torch.save(model.state_dict(), "recent_checkpoint_{timestamp}.pth")
 
     # Lưu checkpoint cuối cùng
     if epoch == num_epochs - 1:
-        torch.save(model.state_dict(), "last_checkpoint.pth")
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        torch.save(model.state_dict(), "last_checkpoint_{timestamp}.pth")
 
 print("Training completed!")
 
 # Đánh giá trên tập Test
-model.load_state_dict(torch.load("best_worldmodel.pth"))  # Load mô hình tốt nhất
+model.load_state_dict(torch.load("best_worldmodel_{timelast}.pth"))  # Load mô hình tốt nhất
 
 def evaluate_model(model, data_loader, criterion):
     model.eval()
@@ -136,10 +170,12 @@ def evaluate_model(model, data_loader, criterion):
                 cameras.to(device),
                 obstacles.to(device),
                 targets.to(device),
-                labels_batch.to(device),
+                labels_batch.argmax(dim=2).to(device),
             )
 
             outputs,_ = model(targets, obstacles, cameras)
+            outputs = outputs.view(-1, outputs.size(-1))          # (batch_size * seq_len, num_classes)
+            labels_batch = labels_batch.view(-1)                  # (batch_size * seq_len)
             loss = criterion(outputs, labels_batch)
             total_loss += loss.item()
 
@@ -147,7 +183,9 @@ def evaluate_model(model, data_loader, criterion):
     return avg_loss
 
 test_loss = evaluate_model(model, test_loader, criterion)
-print(f"Test Loss: {test_loss:.4f}")
+log_message = f"Test Loss: {test_loss:.4f}"
+log_to_file(log_message)
+print(log_message)
 
 # Log Test Loss lên TensorBoard
 writer.add_scalar("Loss/Test", test_loss, 0)
