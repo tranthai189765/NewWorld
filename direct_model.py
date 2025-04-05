@@ -65,7 +65,6 @@ class WorldModel(nn.Module):
     def forward(self, targets, obstacles, cameras):
         cameras = self.encoder_camera(cameras)
         targets = self.encoder_target(targets)
-        obstacles = self.encoder_obstacle(obstacles)
         batch_size = targets.shape[0]
         new_env_base = np.tile(self.env_base, (batch_size, 1))  # (batch_size, 32)
         new_env_base = np.expand_dims(new_env_base, axis=1)  # Thêm 1 chiều: (batch_size, 1, 32)
@@ -73,9 +72,13 @@ class WorldModel(nn.Module):
         new_env_base = self.encode_env(new_env_base)
         # print("env = ", self.env_base)
 
-        context = torch.cat([targets, obstacles, cameras, new_env_base], dim=1)  # Targets học từ tất cả
+        context = torch.cat([targets, cameras, new_env_base], dim=1)  # Targets học từ tất cả
         #print(context.shape)
         for layer in self.layers:
             targets = layer(targets, context)  # Targets học từ tất cả đối tượng
         future_states = self.prediction_head(targets)  # Dự đoán state tương lai
-        return future_states
+
+           # Lấy nhãn dự đoán (0–4) và chuyển thành one-hot
+        predicted_labels = future_states.argmax(dim=-1)  # (batch_size, num_targets)
+        future_states_one_hot = F.one_hot(predicted_labels, num_classes=5).float()  # (batch_size, num_targets, 5)
+        return future_states, future_states_one_hot

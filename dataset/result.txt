@@ -1,0 +1,15 @@
+[2025-04-05 00:59:00] Epoch 1/1000, Train Loss: 3.2452, Valid Loss: 3.2260
+[2025-04-05 00:59:00] Epoch 1/1000, Train Loss: 3.2452, Best Valid Loss: 3.2260 ----- 
+[2025-04-05 00:59:05] Epoch 2/1000, Train Loss: 3.2380, Valid Loss: 3.2295
+[2025-04-05 00:59:10] Epoch 3/1000, Train Loss: 3.2107, Valid Loss: 3.2010
+[2025-04-05 00:59:10] Epoch 3/1000, Train Loss: 3.2107, Best Valid Loss: 3.2010 ----- 
+[2025-04-05 00:59:15] Epoch 4/1000, Train Loss: 3.2015, Valid Loss: 3.1953
+[2025-04-05 00:59:15] Epoch 4/1000, Train Loss: 3.2015, Best Valid Loss: 3.1953 ----- 
+[2025-04-05 00:59:20] Epoch 5/1000, Train Loss: 3.1968, Valid Loss: 3.1913
+[2025-04-05 00:59:20] Epoch 5/1000, Train Loss: 3.1968, Best Valid Loss: 3.1913 ----- 
+[2025-04-05 00:59:25] Epoch 6/1000, Train Loss: 3.1826, Valid Loss: 3.1795
+[2025-04-05 00:59:25] Epoch 6/1000, Train Loss: 3.1826, Best Valid Loss: 3.1795 ----- 
+[2025-04-05 00:59:34] Epoch 7/1000, Train Loss: 3.1856, Valid Loss: 3.1795
+[2025-04-05 00:59:34] Epoch 7/1000, Train Loss: 3.1856, Best Valid Loss: 3.1795 ----- 
+[2025-04-05 00:59:47] Epoch 8/1000, Train Loss: 3.1824, Valid Loss: 3.1599
+[2025-04-05 00:59:47] Epoch 8/1000, Train Loss: 3.1824, Best Valid Loss: 3.1599 ----- 

@@ -22,13 +22,13 @@ def main():
     np.random.seed(SEED)
 
     for episode in range(MAX_EPISODES):
-        base_env = mate.make('MultiAgentTracking-v0')
+        base_env = mate.make('MATE-4v4-0-v0')
         base_env = mate.RenderCommunication(base_env)
         env = mate.MultiCamera(base_env, target_agent=GreedyTargetAgent(seed=SEED + episode))
         env.reset(seed=SEED + episode)  # Đặt seed cho môi trường nếu hỗ trợ
 
-        buffer_obstacles = b_o(max_size=30, obs_shape=(9, 3))
-        buffer_targets = b_t(max_size=30, obs_shape=(8, 4))
+        buffer_obstacles = b_o(max_size=30, obs_shape=(0, 3))
+        buffer_targets = b_t(max_size=30, obs_shape=(4, 4))
         buffer_cameras = b_c(max_size=30, obs_shape=(4, 9))
 
         camera_agents = GreedyCameraAgent().spawn(env.num_cameras)
@@ -40,7 +40,7 @@ def main():
         labels_list = []  # Lưu label
 
         for i in range(MAX_EPISODE_STEPS):
-            print("i = ", i)
+            #print("i = ", i)
             camera_joint_action = mate.group_step(
                 env, camera_agents, camera_joint_observation, camera_infos
             )
@@ -52,20 +52,20 @@ def main():
             buffer_targets.store(t_f.collected_infos(camera_joint_observation))
             target_state = env.get_real_opponent_info()
 
-            if i % 40 == 5:
+            if i % 40 == 6:
                 pending_data = {
                     "cameras": buffer_cameras.take(5),
                     "obstacles": buffer_obstacles.take(),
                     "targets": buffer_targets.take(5),
                 }
 
-            if i % 40 == 15:
+            if i % 40 == 16:
                 label = et_f.collected_infos(target_state)
                 labels_list.append(label)
                 inputs_list.append(pending_data)
-                print("input = ", pending_data)
+                #print("input = ", pending_data)
                 pending_data = None
-                print("label = ", label)
+                #print("label = ", label)
                 label = None 
                 num_label += 1
                 print("numdata = ", num_label)
@@ -81,9 +81,9 @@ def save_data(inputs, labels):
     global num_dataset
     save_path = f"dataset_{num_dataset}.pt"
     
-    print("inputs = ", inputs)
-    print("labels = ", labels)
-    print("num_dataset = ", num_dataset)
+    #print("inputs = ", inputs)
+    #print("labels = ", labels)
+    #print("num_dataset = ", num_dataset)
 
         # Chuyển đổi từng thành phần của inputs thành tensor
     input_tensors = {

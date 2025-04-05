@@ -99,6 +99,16 @@ gym.register(
     entry_point=make_environment,
     kwargs={'config': (ASSETS_DIR / 'MATE-Navigation.yaml')},
 )
+gym.register(
+    id='MATE-2v2-0-v0',
+    entry_point=make_environment,
+    kwargs={'config': (ASSETS_DIR / 'MATE-2v2-0.yaml')},
+)
+gym.register(
+    id='MATE-2v4-0-v0',
+    entry_point=make_environment,
+    kwargs={'config': (ASSETS_DIR / 'MATE-2v4-0.yaml')},
+)
 
 
 del os, gym

@@ -8,7 +8,7 @@ import os
 from direct_model import WorldModel  # Import mô hình của bạn
 
 # Load dataset
-dataset = torch.load("dataset/10k_dataset_modified_labels3.pt")
+dataset = torch.load("dataset_4v4/10k_dataset_modified.pt")
 
 # Lấy từng phần dữ liệu
 inputs_cameras = torch.tensor(dataset["inputs"]["cameras"], dtype=torch.float32)
@@ -68,7 +68,7 @@ for epoch in range(num_epochs):
         )
 
         optimizer.zero_grad()
-        outputs = model(targets, obstacles, cameras)  # Truyền 3 đầu vào riêng biệt vào WorldModel
+        outputs,_ = model(targets, obstacles, cameras)  # Truyền 3 đầu vào riêng biệt vào WorldModel
         loss = criterion(outputs, labels_batch)
         loss.backward()
         optimizer.step()
@@ -89,7 +89,7 @@ for epoch in range(num_epochs):
                 labels_batch.to(device),
             )
 
-            outputs = model(targets, obstacles, cameras)
+            outputs,_ = model(targets, obstacles, cameras)
             loss = criterion(outputs, labels_batch)
             total_valid_loss += loss.item()
 
@@ -139,7 +139,7 @@ def evaluate_model(model, data_loader, criterion):
                 labels_batch.to(device),
             )
 
-            outputs = model(targets, obstacles, cameras)
+            outputs,_ = model(targets, obstacles, cameras)
             loss = criterion(outputs, labels_batch)
             total_loss += loss.item()
 

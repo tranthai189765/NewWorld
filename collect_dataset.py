@@ -4,7 +4,7 @@ import torch
 all_cameras, all_obstacles, all_targets, all_labels = [], [], [], []
 
 # Duyệt qua tất cả các file dataset_0.pt -> dataset_366.pt
-for i in range(367):  # 0 -> 366
+for i in range(500):  # 0 -> 366
     file_name = f"dataset_{i}.pt"
     dataset = torch.load(file_name)
 
@@ -25,6 +25,6 @@ merged_dataset = {
 }
 
 # Lưu dataset đã gộp vào file
-torch.save(merged_dataset, "10k_dataset.pt")
+torch.save(merged_dataset, "10k_dataset_4v4.pt")
 
-print("Gộp dữ liệu thành công, lưu vào 10k_dataset.pt")
+print("Gộp dữ liệu thành công, lưu vào 10k_dataset_4v4.pt")

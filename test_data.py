@@ -1,15 +1,15 @@
 import torch
 # Load dataset từ file
-dataset = torch.load("dataset/10k_dataset_modified_labels3.pt")  # Thay bằng tên file thực tế
+dataset = torch.load("dataset_4v4/10k_dataset_modified.pt")  # Thay bằng tên file thực tế
 
 # Kiểm tra keys (nếu lưu dưới dạng dictionary)
 print(dataset.keys())
 
 # Xem thử một số dữ liệu (giả sử dữ liệu lưu dưới dạng dictionary)
-print("Cameras Sample:", dataset["inputs"]["cameras"][:2])
-print("Obstacles Sample:", dataset["inputs"]["obstacles"][:2])
-print("Targets Sample:", dataset["inputs"]["targets"][:2])
-print("Targets Label: ", dataset["labels"][:2])
+print("Cameras Sample:", dataset["inputs"]["cameras"].shape)
+print("Obstacles Sample:", dataset["inputs"]["obstacles"].shape)
+print("Targets Sample:", dataset["inputs"]["targets"].shape)
+print("Targets Label: ", dataset["labels"].shape)
 
 # Mỗi cameras_input có số chiều [4, 45]: tôi cần chia 1000 cho các giá trị index % 9 != {5,7,8} theo chiều thú 2
 # Mỗi obstacles_input có cố chiều là [9, 3] : tôi cần chia các giá trị cho 1000 đối với các giá trị khác -1

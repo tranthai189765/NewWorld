@@ -17,7 +17,7 @@ def collected_infos(obs):
     for j in range(n_c):
         for i in range(n_o):
             if output[i][3] != 1: # Not filled yet
-                output[i] = obs[j][22 + 5*n_t + 4*i : 22 + 5*n_t + 4*i + 4]
+                output[i] = obs[j][22 + 5*n_t + 4*i : 22 + 5*n_t + 4*i + 4] 
                 
     
     # Nếu hàng nào toàn 0 thì set lại bằng -1
