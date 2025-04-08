@@ -103,6 +103,7 @@ class WorldModel(nn.Module):
         self.init_embed_dim = init_embed_dim
         self.num_targets = num_targets 
         self.num_cameras = num_cameras
+        self.init_ff_dim = init_ff_dim
 
         env = mate.make('MATE-4v4-0-v0')
         env = mate.MultiCamera(env, target_agent=mate.GreedyTargetAgent(seed=0))
