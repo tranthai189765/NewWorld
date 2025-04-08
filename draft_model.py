@@ -41,43 +41,54 @@ class TransformerLayer(nn.Module):
         return x
 
 class WorldModel(nn.Module):
-    def __init__(self, init_embed_dim=32, final_embed_dim=128, init_num_heads=2, num_heads=8, init_ff_dim=64, final_ff_dim=512, num_layers=1, 
+    def __init__(self, init_embed_dim=32, final_embed_dim=128, init_num_heads=2, num_heads=8, 
+                 init_ff_dim=64, final_ff_dim=512, num_layers=1, 
                  num_timesteps=30, steps_per_segment=5, 
-                 num_targets=8, target_features=4, 
-                 num_cameras=4, camera_features=13):
+                 num_targets=4, target_features=4, 
+                 num_cameras=4, camera_features=13, dropout=0.1):
         super().__init__()
         self.target_features = target_features
         self.camera_features = camera_features
+        self.dropout = dropout  # Thêm thuộc tính dropout
+
         # Targets
         self.target_projection = nn.Linear(target_features, init_embed_dim)  # 4 -> 32
         self.target_segment_attention = nn.MultiheadAttention(init_embed_dim, init_num_heads, batch_first=True)
         self.target_segment_ff = nn.Sequential(
-            nn.Linear(steps_per_segment * init_embed_dim, init_ff_dim),  # 5 * 64 = 320
+            nn.Linear(steps_per_segment * init_embed_dim, init_ff_dim),  # 5 * 32 = 160 -> 64
             nn.ReLU(),
-            nn.Linear(init_ff_dim, init_ff_dim)  # 256 -> 64
+            nn.Dropout(dropout),
+            nn.Linear(init_ff_dim, init_ff_dim)  # 64 -> 64
         )
         self.target_global_attention = nn.MultiheadAttention(init_ff_dim, init_num_heads, batch_first=True)
-        self.target_global_ff = nn.Linear((num_timesteps // steps_per_segment) * init_ff_dim, final_embed_dim)  # 5 * 64 = 320 -> 64
+        self.target_global_ff = nn.Sequential(
+            nn.Linear((num_timesteps // steps_per_segment) * init_ff_dim, final_embed_dim),  # 6 * 64 = 384 -> 128
+            nn.Dropout(dropout)
+        )
         
         # Cameras
-        self.camera_projection = nn.Linear(camera_features, init_embed_dim)  # 13 -> 64
+        self.camera_projection = nn.Linear(camera_features, init_embed_dim)  # 13 -> 32
         self.camera_segment_attention = nn.MultiheadAttention(init_embed_dim, init_num_heads, batch_first=True)
         self.camera_segment_ff = nn.Sequential(
-            nn.Linear(steps_per_segment * init_embed_dim, init_ff_dim),  # 5 * 64 = 320
+            nn.Linear(steps_per_segment * init_embed_dim, init_ff_dim),  # 5 * 32 = 160 -> 64
             nn.ReLU(),
-            nn.Linear(init_ff_dim, init_ff_dim)  # 256 -> 64
+            nn.Dropout(dropout),
+            nn.Linear(init_ff_dim, init_ff_dim)  # 64 -> 64
         )
         self.camera_global_attention = nn.MultiheadAttention(init_ff_dim, init_num_heads, batch_first=True)
-        self.camera_global_ff = nn.Linear((num_timesteps // steps_per_segment) * init_ff_dim, final_embed_dim)  # 5 * 64 = 320 -> 64
-        self.init_ff_dim = init_ff_dim
+        self.camera_global_ff = nn.Sequential(
+            nn.Linear((num_timesteps // steps_per_segment) * init_ff_dim, final_embed_dim),  # 6 * 64 = 384 -> 128
+            nn.Dropout(dropout)
+        )
         
         # Other components
         self.layers = nn.ModuleList([
-            TransformerLayer(final_embed_dim, num_heads, final_ff_dim) for _ in range(num_layers)
+            TransformerLayer(final_embed_dim, num_heads, final_ff_dim, dropout) for _ in range(num_layers)
         ])
         self.prediction_head = nn.Sequential(
             nn.Linear(final_embed_dim, 64),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(64, 5),
         )
         self.encoder_target = EncodeLinear(final_embed_dim, final_embed_dim)
@@ -91,10 +102,10 @@ class WorldModel(nn.Module):
         self.num_targets = num_targets 
         self.num_cameras = num_cameras
 
-        env =  mate.make('MATE-4v4-0-v0')
+        env = mate.make('MATE-4v4-0-v0')
         env = mate.MultiCamera(env, target_agent=mate.GreedyTargetAgent(seed=0))
         env_base = env.reset()
-        self.env_base = eb_f.collected_infos(env_base)
+        self.env_base = eb_f.collected_infos(env_base)  # Giả sử eb_f là module bạn định nghĩa
 
     def get_sinusoidal_pos_encoding(self, seq_len, d_model, device):
         position = torch.arange(seq_len, dtype=torch.float, device=device).unsqueeze(1)
