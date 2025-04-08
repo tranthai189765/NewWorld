@@ -18,7 +18,7 @@ class MultiHeadSelfAttention(nn.Module):
         return self.norm(x + attn_output)  # Residual Connection + LayerNorm
 
 class TransformerLayer(nn.Module):
-    def __init__(self, embed_dim, num_heads, ff_dim):
+    def __init__(self, embed_dim, num_heads, ff_dim, dropout=0.1):
         super().__init__()
         self.attn = MultiHeadSelfAttention(embed_dim, num_heads)
         self.norm1 = nn.LayerNorm(embed_dim)  # LayerNorm sau Multi-Head Attention
@@ -26,7 +26,9 @@ class TransformerLayer(nn.Module):
         self.ffn = nn.Sequential(
             nn.Linear(embed_dim, ff_dim),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(ff_dim, embed_dim)
+            
         )
     
     def forward(self, x, context):
