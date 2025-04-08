@@ -25,3 +25,16 @@ class EncodeLinear(nn.Module):
         x = inputs.to(self.device)  # Đưa input lên đúng device
         feature = self.features(x)
         return feature
+
+class FeedForward(nn.Module):
+    def __init__(self, dim_in, ff_dim, dim_out):
+        super(FeedForward, self).__init__()
+        self.linear1 = nn.Linear(dim_in, ff_dim)
+        self.relu = nn.ReLU()
+        self.linear2 = nn.Linear(ff_dim, dim_out)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.relu(x)
+        x = self.linear2(x)
+        return x

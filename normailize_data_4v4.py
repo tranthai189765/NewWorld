@@ -1,7 +1,7 @@
 import torch
 
 # Load file .pt (giả sử nó là dictionary chứa key "labels")
-dataset = torch.load("dataset_4v4/100k_dataset_4v4.pt")
+dataset = torch.load("dataset_4v4/75k_dataset_30_times_4v4.pt")
 
 # Lấy tensor labels và chuyển sang float32
 labels = torch.tensor(dataset["labels"], dtype=torch.float32)
@@ -22,8 +22,8 @@ cameras = dataset["inputs"]["cameras"]
 
 # Lặp qua index cuối (0 -> 44), giữ lại các index không phải 5, 7, 8 trong mỗi nhóm 9
 mask = torch.ones_like(cameras)
-for i in range(45):
-    if i % 9 in [5, 7, 8]:
+for i in range(30*13):
+    if i % 13 in [5, 7, 8, 9, 10,11,12]:
         mask[:, :, i] = 0  # không chia
     else:
         mask[:, :, i] = 1  # sẽ chia
@@ -53,4 +53,4 @@ for idx in idx_3:
 dataset["inputs"]["targets"] = targets
 
 # Lưu lại file mới
-torch.save(dataset, "dataset_4v4/100k_dataset_modified.pt")
+torch.save(dataset, "dataset_4v4/75k_dataset_30_times_4v4_modified.pt")

@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, TensorDataset, random_split
 from torch.utils.tensorboard import SummaryWriter
 import os
 
-from direct_model import WorldModel  # Import mô hình của bạn
+from draft_model import WorldModel  # Import mô hình của bạn
 from focal_loss import FocalLoss
 import datetime
 import time
@@ -15,7 +15,7 @@ import numpy as np
 
 
 # Load dataset
-dataset = torch.load("dataset_4v4/100k_dataset_modified.pt")
+dataset = torch.load("dataset_4v4/75k_dataset_30_times_4v4_modified.pt")
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") 
 
@@ -68,12 +68,12 @@ manual_weights = torch.tensor([0.5, 1.5, 1.5, 1.5, 1.5], device=device)
 # Khởi tạo mô hình
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # model = WorldModel(embed_dim=64, num_heads=8, ff_dim=256, num_layers=1).to(device)
-model = WorldModel(embed_dim=512, num_heads=2, ff_dim=1024, num_layers=1).to(device)
+model = WorldModel().to(device)
 
 # Loss & Optimizer
-criterion = FocalLoss(gamma=4, weight=manual_weights)
-# criterion = nn.CrossEntropyLoss(weight=manual_weights.to(device))
-optimizer = optim.Adam(model.parameters(), lr=0.003)
+# criterion = FocalLoss(gamma=4, weight=manual_weights)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
 
 # Early Stopping
 early_stopping_patience = 50  # Số epoch chờ trước khi dừng nếu không cải thiện

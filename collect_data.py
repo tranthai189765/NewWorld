@@ -15,6 +15,7 @@ from buffer.camera_buffer import CameraBuffer as b_c
 MAX_EPISODE_STEPS = 4000
 MAX_EPISODES = 5000
 num_dataset = 0
+# Đảm bảo in đầy đủ dữ liệu numpy
 def main():
     num_label = 0
     global num_dataset  # Biến đếm dataset để lưu file
@@ -27,9 +28,9 @@ def main():
         env = mate.MultiCamera(base_env, target_agent=GreedyTargetAgent(seed=SEED + episode))
         env.reset(seed=SEED + episode)  # Đặt seed cho môi trường nếu hỗ trợ
 
-        buffer_obstacles = b_o(max_size=30, obs_shape=(0, 3))
-        buffer_targets = b_t(max_size=30, obs_shape=(4, 4))
-        buffer_cameras = b_c(max_size=30, obs_shape=(4, 9))
+        buffer_obstacles = b_o(max_size=50, obs_shape=(0, 3))
+        buffer_targets = b_t(max_size=50, obs_shape=(4, 4))
+        buffer_cameras = b_c(max_size=50, obs_shape=(4, 13))
 
         camera_agents = GreedyCameraAgent().spawn(env.num_cameras)
         camera_joint_observation = env.reset()
@@ -52,18 +53,19 @@ def main():
             buffer_targets.store(t_f.collected_infos(camera_joint_observation))
             target_state = env.get_real_opponent_info()
 
-            if i % 40 == 6:
+            if i % 50 == 31:
                 pending_data = {
-                    "cameras": buffer_cameras.take(5),
+                    "cameras": buffer_cameras.take(30),
                     "obstacles": buffer_obstacles.take(),
-                    "targets": buffer_targets.take(5),
+                    "targets": buffer_targets.take(30),
                 }
 
-            if i % 40 == 16:
+            if i % 50 == 41:
                 label = et_f.collected_infos(target_state)
                 labels_list.append(label)
                 inputs_list.append(pending_data)
-                #print("input = ", pending_data)
+                # print("input = ", pending_data)
+                # time.sleep(30)
                 pending_data = None
                 #print("label = ", label)
                 label = None 

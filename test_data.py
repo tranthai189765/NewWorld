@@ -1,16 +1,30 @@
 import torch
+import numpy as np
+
+# Thiết lập để in đầy đủ numpy array
+np.set_printoptions(threshold=np.inf, linewidth=np.inf, suppress=True)
+
 # Load dataset từ file
-dataset = torch.load("dataset_4v4/100k_dataset_modified.pt")  # Thay bằng tên file thực tế
+dataset = torch.load("dataset_4v4/75k_dataset_30_times_4v4_modified.pt")  # Thay bằng đường dẫn thực tế
 
-# Kiểm tra keys (nếu lưu dưới dạng dictionary)
-print(dataset.keys())
+# Kiểm tra keys
+print("Dataset keys:", dataset.keys())
 
-# Xem thử một số dữ liệu (giả sử dữ liệu lưu dưới dạng dictionary)
-print("Cameras Sample:", dataset["inputs"]["cameras"].shape)
-print("Obstacles Sample:", dataset["inputs"]["obstacles"].shape)
-print("Targets Sample:", dataset["inputs"]["targets"].shape)
-print("Targets Label: ", dataset["labels"].shape)
+# In thông tin shape
+print("Cameras shape:", dataset["inputs"]["cameras"].shape)
+print("Obstacles shape:", dataset["inputs"]["obstacles"].shape)
+print("Targets shape:", dataset["inputs"]["targets"].shape)
+print("Labels shape:", dataset["labels"].shape)
 
-# Mỗi cameras_input có số chiều [4, 45]: tôi cần chia 1000 cho các giá trị index % 9 != {5,7,8} theo chiều thú 2
-# Mỗi obstacles_input có cố chiều là [9, 3] : tôi cần chia các giá trị cho 1000 đối với các giá trị khác -1
-# Mỗi targets_input có số chiều là [8, 20] : tôi cần chia 1000 cho các index % 4! = 3 theo chiều thứ 2 , đối với các giá trị khác -1
+# In đầy đủ sample đầu tiên (chuyển sang numpy nếu là tensor)
+print("\n--- Sample dữ liệu đầu tiên ---")
+
+cameras_sample = dataset["inputs"]["cameras"][0].numpy()
+obstacles_sample = dataset["inputs"]["obstacles"][0].numpy()
+targets_sample = dataset["inputs"]["targets"][0].numpy()
+labels_sample = dataset["labels"][0].numpy()
+
+print("Cameras Sample:\n", cameras_sample)
+print("Obstacles Sample:\n", obstacles_sample)
+print("Targets Sample:\n", targets_sample)
+print("Labels Sample:\n", labels_sample)
