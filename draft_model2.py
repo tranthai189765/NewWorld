@@ -21,6 +21,7 @@ class TransformerLayer(nn.Module):
         self.norm1 = nn.LayerNorm(embed_dim)  # Sau self-attention
         self.norm2 = nn.LayerNorm(embed_dim)  # Sau cross-attention
         self.norm3 = nn.LayerNorm(embed_dim)  # Sau FFN
+        self.norm4 = nn.LayerNorm(embed_dim)  # Sau FFN
         # Feed Forward
         self.ffn = nn.Sequential(
             nn.Linear(embed_dim, ff_dim),
