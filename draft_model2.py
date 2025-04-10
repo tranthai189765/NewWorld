@@ -143,6 +143,11 @@ class WorldModel(nn.Module):
         target_segment_out = self.target_segment_ff(target_segment_flat)
         target_segment_out = target_segment_out.view(batch_size * num_targets, num_segments, self.init_ff_dim)
 
+        # Thêm positional embedding cho các segment của targets
+        pos_encoding_segments = self.get_sinusoidal_pos_encoding(num_segments, self.init_ff_dim, targets.device)
+        pos_encoding_segments = pos_encoding_segments.expand(batch_size * num_targets, num_segments, self.init_ff_dim)
+        target_segment_out = target_segment_out + pos_encoding_segments
+
         target_global_attn_out, _ = self.target_global_attention(target_segment_out, target_segment_out, target_segment_out)
         target_global_attn_out = target_global_attn_out.contiguous().view(batch_size, num_targets, num_segments, self.init_ff_dim)
         target_global_flat = target_global_attn_out.view(batch_size, num_targets, num_segments * self.init_ff_dim)
@@ -164,6 +169,11 @@ class WorldModel(nn.Module):
         camera_segment_out = self.camera_segment_ff(camera_segment_flat)
         camera_segment_out = camera_segment_out.view(batch_size * num_cameras, num_segments, self.init_ff_dim)
 
+        # Thêm positional embedding cho các segment của cameras
+        pos_encoding_segments_cameras = self.get_sinusoidal_pos_encoding(num_segments, self.init_ff_dim, cameras.device)
+        pos_encoding_segments_cameras = pos_encoding_segments_cameras.expand(batch_size * num_cameras, num_segments, self.init_ff_dim)
+        camera_segment_out = camera_segment_out + pos_encoding_segments_cameras
+
         camera_global_attn_out, _ = self.camera_global_attention(camera_segment_out, camera_segment_out, camera_segment_out)
         camera_global_attn_out = camera_global_attn_out.contiguous().view(batch_size, num_cameras, num_segments, self.init_ff_dim)
         camera_global_flat = camera_global_attn_out.view(batch_size, num_cameras, num_segments * self.init_ff_dim)
@@ -171,7 +181,7 @@ class WorldModel(nn.Module):
         cameras_embedded = self.encoder_camera(cameras_final)
 
         # Xử lý obstacles và env
-        # obstacles_embedded = self.encoder_obstacle(obstacles)
+        obstacles_embedded = self.encoder_obstacle(obstacles)
         new_env_base = np.tile(self.env_base, (batch_size, 1))
         new_env_base = np.expand_dims(new_env_base, axis=1)
         new_env_base = torch.tensor(new_env_base, dtype=torch.float32, device=targets.device)
