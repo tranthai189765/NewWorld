@@ -170,7 +170,7 @@ class WorldModel(nn.Module):
         cameras_embedded = self.encoder_camera(cameras_final)
 
         # Xử lý obstacles và env
-        obstacles_embedded = self.encoder_obstacle(obstacles)
+        # obstacles_embedded = self.encoder_obstacle(obstacles)
         new_env_base = np.tile(self.env_base, (batch_size, 1))
         new_env_base = np.expand_dims(new_env_base, axis=1)
         new_env_base = torch.tensor(new_env_base, dtype=torch.float32, device=targets.device)
