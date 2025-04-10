@@ -14,7 +14,7 @@ class TransformerLayer(nn.Module):
         # Self-attention cho targets
         self.self_attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         # Cross-attention từ targets sang cameras
-        self.cross_attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+        self.cross_attn_cameras = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         # Cross-attention từ targets sang env_base
         self.cross_attn_env = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         # LayerNorm
