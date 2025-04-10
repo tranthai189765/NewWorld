@@ -9,8 +9,10 @@ import time
 import math
 
 class TransformerLayer(nn.Module):
-    def __init__(self, embed_dim, num_heads, ff_dim, dropout=0.2):  # Tăng dropout lên 0.2
+    def __init__(self, embed_dim, num_heads, ff_dim, dropout=0.3):  # Tăng dropout lên 0.3 để giảm overfitting
         super().__init__()
+        # Cross-attention từ cameras sang targets
+        self.cross_attn_targets = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         # Self-attention cho targets
         self.self_attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         # Cross-attention từ targets sang cameras
@@ -18,9 +20,10 @@ class TransformerLayer(nn.Module):
         # Cross-attention từ targets sang env_base
         self.cross_attn_env = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         # LayerNorm
+        self.norm0 = nn.LayerNorm(embed_dim)  # Sau cross-attention từ cameras sang targets
         self.norm1 = nn.LayerNorm(embed_dim)  # Sau self-attention
-        self.norm2 = nn.LayerNorm(embed_dim)  # Sau cross-attention
-        self.norm3 = nn.LayerNorm(embed_dim)  # Sau FFN
+        self.norm2 = nn.LayerNorm(embed_dim)  # Sau cross-attention từ targets sang cameras
+        self.norm3 = nn.LayerNorm(embed_dim)  # Sau cross-attention từ targets sang env_base
         self.norm4 = nn.LayerNorm(embed_dim)  # Sau FFN
         # Feed Forward
         self.ffn = nn.Sequential(
@@ -32,23 +35,27 @@ class TransformerLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
     
     def forward(self, targets, cameras, env_base):
-            # 1. Self-attention trên targets
-            self_attn_out, _ = self.self_attn(targets, targets, targets)
-            targets = self.norm1(targets + self.dropout(self_attn_out))  # Residual + LayerNorm
+        # 1. Cross-attention từ cameras sang targets
+        cross_targets_out, _ = self.cross_attn_targets(cameras, targets, targets)
+        cameras = self.norm0(cameras + self.dropout(cross_targets_out))  # Cập nhật cameras
 
-            # 2. Cross-attention từ targets sang cameras
-            cross_cameras_out, _ = self.cross_attn_cameras(targets, cameras, cameras)
-            targets = self.norm2(targets + self.dropout(cross_cameras_out))  # Residual + LayerNorm
+        # 2. Self-attention trên targets
+        self_attn_out, _ = self.self_attn(targets, targets, targets)
+        targets = self.norm1(targets + self.dropout(self_attn_out))
 
-            # 3. Cross-attention từ targets sang env_base
-            cross_env_out, _ = self.cross_attn_env(targets, env_base, env_base)
-            targets = self.norm3(targets + self.dropout(cross_env_out))  # Residual + LayerNorm
+        # 3. Cross-attention từ targets sang cameras (dùng cameras đã cập nhật)
+        cross_cameras_out, _ = self.cross_attn_cameras(targets, cameras, cameras)
+        targets = self.norm2(targets + self.dropout(cross_cameras_out))
 
-            # 4. Feed Forward
-            ffn_out = self.ffn(targets)
-            targets = self.norm4(targets + self.dropout(ffn_out))  # Residual + LayerNorm
+        # 4. Cross-attention từ targets sang env_base
+        cross_env_out, _ = self.cross_attn_env(targets, env_base, env_base)
+        targets = self.norm3(targets + self.dropout(cross_env_out))
 
-            return targets
+        # 5. Feed Forward
+        ffn_out = self.ffn(targets)
+        targets = self.norm4(targets + self.dropout(ffn_out))
+
+        return targets, cameras
 
 class WorldModel(nn.Module):
     def __init__(self, init_embed_dim=32, final_embed_dim=128, init_num_heads=2, num_heads=8, 
@@ -189,8 +196,9 @@ class WorldModel(nn.Module):
 
         # Transformer layers: Chỉ truyền targets và cameras, không cần context đầy đủ
         targets_out = targets_embedded
+        cameras_out = cameras_embedded
         for layer in self.layers:
-            targets_out = layer(targets_out, cameras_embedded, new_env_base)  # Self-attention trên targets, cross-attention với cameras
+            targets_out, cameras_out = layer(targets_out, cameras_out, new_env_base)  # Self-attention trên targets, cross-attention với cameras
         
         # Dự đoán
         future_states = self.prediction_head(targets_out)
