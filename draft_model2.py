@@ -156,7 +156,10 @@ class WorldModel(nn.Module):
         # Average pooling
         targets_final = target_cls_attn_out.mean(dim=1)  # [batch_size * num_targets, init_embed_dim]
         targets_final = targets_final.view(batch_size, num_targets, self.init_embed_dim)
+        # Transpose for BatchNorm
+        targets_final = targets_final.transpose(1, 2)  # [batch_size, init_embed_dim, num_targets]
         targets_final = self.target_cls_bn(targets_final)
+        targets_final = targets_final.transpose(1, 2)  # [batch_size, num_targets, init_embed_dim]
         targets_embedded = self.encoder_target(targets_final)
 
         # Cameras: Projection
@@ -188,7 +191,10 @@ class WorldModel(nn.Module):
         camera_cls_attn_out, _ = self.camera_cls_attention(camera_cls, camera_cls, camera_cls)
         cameras_final = camera_cls_attn_out.mean(dim=1)
         cameras_final = cameras_final.view(batch_size, self.num_cameras, self.init_embed_dim)
+        # Transpose for BatchNorm
+        cameras_final = cameras_final.transpose(1, 2)  # [batch_size, init_embed_dim, num_cameras]
         cameras_final = self.camera_cls_bn(cameras_final)
+        cameras_final = cameras_final.transpose(1, 2)  # [batch_size, num_cameras, init_embed_dim]
         cameras_embedded = self.encoder_camera(cameras_final)
 
         # Obstacles and Env
