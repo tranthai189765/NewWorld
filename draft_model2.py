@@ -8,7 +8,7 @@ from perception import EncodeLinear, FeedForward
 from filter import env_base_filter as eb_f
 
 class TransformerLayer(nn.Module):
-    def __init__(self, embed_dim, num_heads, ff_dim, dropout=0.2):
+    def __init__(self, embed_dim, num_heads, ff_dim, dropout=0.3):
         super().__init__()
         self.cross_attn_targets = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         self.self_attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
@@ -45,7 +45,7 @@ class WorldModel(nn.Module):
                  init_ff_dim=64, final_ff_dim=512, num_layers=1, 
                  num_timesteps=30, steps_per_segment=5, 
                  num_targets=4, target_features=4, 
-                 num_cameras=4, camera_features=13, dropout=0.2):
+                 num_cameras=4, camera_features=13, dropout=0.3):
         super().__init__()
         self.target_features = target_features
         self.camera_features = camera_features
@@ -80,6 +80,10 @@ class WorldModel(nn.Module):
         self.target_cls_norm = nn.LayerNorm(init_embed_dim)
         self.camera_cls_norm = nn.LayerNorm(init_embed_dim)
         self.prediction_norm = nn.LayerNorm(final_embed_dim)
+
+        # Attention pooling
+        self.target_pooling = nn.Linear(init_embed_dim, 1)
+        self.camera_pooling = nn.Linear(init_embed_dim, 1)
 
         # Transformer layers
         self.layers = nn.ModuleList([
@@ -142,7 +146,7 @@ class WorldModel(nn.Module):
         # Target segment attention
         targets_flat = targets_with_pos.view(batch_size * num_targets * self.num_segments, self.steps_per_segment + 1, self.init_embed_dim)
         target_segment_attn_out, _ = self.target_segment_attention(targets_flat, targets_flat, targets_flat)
-        # Extract CLS
+        # Extract CLS and apply LayerNorm
         target_cls = target_segment_attn_out[:, 0:1, :].contiguous()  # [batch_size * num_targets * num_segments, 1, init_embed_dim]
         target_cls = target_cls.view(batch_size * num_targets * self.num_segments, self.init_embed_dim)
         target_cls = self.target_segment_norm(target_cls).view(batch_size * num_targets, self.num_segments, self.init_embed_dim)
@@ -154,8 +158,10 @@ class WorldModel(nn.Module):
 
         # CLS attention for targets
         target_cls_attn_out, _ = self.target_cls_attention(target_cls, target_cls, target_cls)
-        # Average pooling
-        targets_final = target_cls_attn_out.mean(dim=1)  # [batch_size * num_targets, init_embed_dim]
+        # Attention pooling
+        target_scores = self.target_pooling(target_cls_attn_out).squeeze(-1)  # [batch_size * num_targets, num_segments]
+        target_weights = F.softmax(target_scores, dim=1).unsqueeze(-1)  # [batch_size * num_targets, num_segments, 1]
+        targets_final = (target_cls_attn_out * target_weights).sum(dim=1)  # [batch_size * num_targets, init_embed_dim]
         targets_final = targets_final.view(batch_size, num_targets, self.init_embed_dim)
         targets_final = self.target_cls_norm(targets_final)
         targets_embedded = self.encoder_target(targets_final)
@@ -167,7 +173,6 @@ class WorldModel(nn.Module):
         # Add CLS token for cameras
         cls_tokens_cameras = self.camera_cls_token.expand(batch_size, self.num_cameras, self.num_segments, 1, self.init_embed_dim)
         cameras_with_cls = torch.cat([cls_tokens_cameras, cameras_segments], dim=3)
-        
 
         # Positional encoding for cameras (CLS + timesteps)
         pos_encoding_cameras = self.get_sinusoidal_pos_encoding(self.steps_per_segment + 1, self.init_embed_dim, cameras.device)
@@ -188,7 +193,10 @@ class WorldModel(nn.Module):
 
         # CLS attention for cameras
         camera_cls_attn_out, _ = self.camera_cls_attention(camera_cls, camera_cls, camera_cls)
-        cameras_final = camera_cls_attn_out.mean(dim=1)
+        # Attention pooling
+        camera_scores = self.camera_pooling(camera_cls_attn_out).squeeze(-1)  # [batch_size * num_cameras, num_segments]
+        camera_weights = F.softmax(camera_scores, dim=1).unsqueeze(-1)  # [batch_size * num_cameras, num_segments, 1]
+        cameras_final = (camera_cls_attn_out * camera_weights).sum(dim=1)  # [batch_size * num_cameras, init_embed_dim]
         cameras_final = cameras_final.view(batch_size, self.num_cameras, self.init_embed_dim)
         cameras_final = self.camera_cls_norm(cameras_final)
         cameras_embedded = self.encoder_camera(cameras_final)
