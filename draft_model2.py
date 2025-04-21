@@ -77,8 +77,8 @@ class WorldModel(nn.Module):
         # Batch Normalization
         self.target_segment_bn = nn.BatchNorm1d(init_embed_dim)
         self.camera_segment_bn = nn.BatchNorm1d(init_embed_dim)
-        self.target_cls_bn = nn.BatchNorm1d(final_embed_dim)
-        self.camera_cls_bn = nn.BatchNorm1d(final_embed_dim)
+        self.target_cls_bn = nn.BatchNorm1d(init_embed_dim)
+        self.camera_cls_bn = nn.BatchNorm1d(init_embed_dim)
         self.prediction_bn = nn.BatchNorm1d(final_embed_dim)
 
         # Transformer layers
