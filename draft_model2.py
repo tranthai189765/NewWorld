@@ -116,6 +116,7 @@ class WorldModel(nn.Module):
 
     def forward(self, targets, obstacles, cameras):
         batch_size, num_targets, target_flat_dim = targets.shape
+        _, num_cameras, camera_flat_dim = cameras.shape
         targets_reshaped = targets.view(batch_size, num_targets, self.num_timesteps, self.target_features)
         cameras_reshaped = cameras.view(batch_size, self.num_cameras, self.num_timesteps, self.camera_features)
 
