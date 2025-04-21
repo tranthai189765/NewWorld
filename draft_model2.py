@@ -74,13 +74,6 @@ class WorldModel(nn.Module):
         self.target_cls_attention = nn.MultiheadAttention(init_embed_dim, init_num_heads, batch_first=True)
         self.camera_cls_attention = nn.MultiheadAttention(init_embed_dim, init_num_heads, batch_first=True)
 
-        # Batch Normalization
-        self.target_segment_bn = nn.BatchNorm1d(init_embed_dim)
-        self.camera_segment_bn = nn.BatchNorm1d(init_embed_dim)
-        self.target_cls_bn = nn.BatchNorm1d(init_embed_dim)
-        self.camera_cls_bn = nn.BatchNorm1d(init_embed_dim)
-        self.prediction_bn = nn.BatchNorm1d(final_embed_dim)
-
         # Transformer layers
         self.layers = nn.ModuleList([
             TransformerLayer(final_embed_dim, num_heads, final_ff_dim, dropout) for _ in range(num_layers)
@@ -141,10 +134,10 @@ class WorldModel(nn.Module):
         # Target segment attention
         targets_flat = targets_with_pos.view(batch_size * num_targets * self.num_segments, self.steps_per_segment + 1, self.init_embed_dim)
         target_segment_attn_out, _ = self.target_segment_attention(targets_flat, targets_flat, targets_flat)
-        # Extract CLS and apply BatchNorm
+        # Extract CLS
         target_cls = target_segment_attn_out[:, 0:1, :].contiguous()  # [batch_size * num_targets * num_segments, 1, init_embed_dim]
         target_cls = target_cls.view(batch_size * num_targets * self.num_segments, self.init_embed_dim)
-        target_cls = self.target_segment_bn(target_cls).view(batch_size * num_targets, self.num_segments, self.init_embed_dim)
+        target_cls = target_cls.view(batch_size * num_targets, self.num_segments, self.init_embed_dim)
 
         # Positional encoding for CLS
         pos_encoding_cls = self.get_sinusoidal_pos_encoding(self.num_segments, self.init_embed_dim, targets.device)
@@ -156,10 +149,6 @@ class WorldModel(nn.Module):
         # Average pooling
         targets_final = target_cls_attn_out.mean(dim=1)  # [batch_size * num_targets, init_embed_dim]
         targets_final = targets_final.view(batch_size, num_targets, self.init_embed_dim)
-        # Transpose for BatchNorm
-        targets_final = targets_final.transpose(1, 2)  # [batch_size, init_embed_dim, num_targets]
-        targets_final = self.target_cls_bn(targets_final)
-        targets_final = targets_final.transpose(1, 2)  # [batch_size, num_targets, init_embed_dim]
         targets_embedded = self.encoder_target(targets_final)
 
         # Cameras: Projection
@@ -180,7 +169,7 @@ class WorldModel(nn.Module):
         camera_segment_attn_out, _ = self.camera_segment_attention(cameras_flat, cameras_flat, cameras_flat)
         camera_cls = camera_segment_attn_out[:, 0:1, :].contiguous()
         camera_cls = camera_cls.view(batch_size * self.num_cameras * self.num_segments, self.init_embed_dim)
-        camera_cls = self.camera_segment_bn(camera_cls).view(batch_size * self.num_cameras, self.num_segments, self.init_embed_dim)
+        camera_cls = camera_cls.view(batch_size * self.num_cameras, self.num_segments, self.init_embed_dim)
 
         # Positional encoding for CLS
         pos_encoding_cls_cameras = self.get_sinusoidal_pos_encoding(self.num_segments, self.init_embed_dim, cameras.device)
@@ -191,10 +180,6 @@ class WorldModel(nn.Module):
         camera_cls_attn_out, _ = self.camera_cls_attention(camera_cls, camera_cls, camera_cls)
         cameras_final = camera_cls_attn_out.mean(dim=1)
         cameras_final = cameras_final.view(batch_size, self.num_cameras, self.init_embed_dim)
-        # Transpose for BatchNorm
-        cameras_final = cameras_final.transpose(1, 2)  # [batch_size, init_embed_dim, num_cameras]
-        cameras_final = self.camera_cls_bn(cameras_final)
-        cameras_final = cameras_final.transpose(1, 2)  # [batch_size, num_cameras, init_embed_dim]
         cameras_embedded = self.encoder_camera(cameras_final)
 
         # Obstacles and Env
@@ -205,7 +190,6 @@ class WorldModel(nn.Module):
             targets_out, cameras_out = layer(targets_out, cameras_out, new_env_base)
         
         # Prediction
-        targets_out = self.prediction_bn(targets_out)
         future_states = self.prediction_head(targets_out)
         predicted_labels = future_states.argmax(dim=-1)
         future_states_one_hot = F.one_hot(predicted_labels, num_classes=5).float()
