@@ -9,19 +9,26 @@ def split(obs):
     return output
 
 def collected_infos(obs):
-    n_c = int(obs[0][0])
-    n_t = int(obs[0][1])
-    output = np.zeros((n_t, 5))
+    n_c = int(obs[0][0])  # Số camera
+    n_t = int(obs[0][1])  # Số target
+
+    output = np.zeros((n_t, 4 + n_c))  # 4 thông tin target + n_c cờ quan sát
+
     for j in range(n_c):
         for i in range(n_t):
-            if output[i][3] != 1: # Not filled yet
-                output[i] = obs[j][22 + 5*i : 22 + 5*i + 5]
-    
-    # Nếu hàng nào toàn 0 thì set lại bằng -1
-    mask = np.all(output == 0, axis=1)
-    output[mask] = -1
+            # Check xem camera j có thấy target i không
+            visible = obs[j][22 + 5*i + 4] == 1
+            if visible:
+                # Gán cờ camera j thấy target i
+                output[i][4 + j] = 1
+                # Nếu thông tin 4 chiều đầu của target vẫn toàn 0, thì gán dữ liệu từ camera j
+                if np.all(output[i][:4] == 0):
+                    output[i][:4] = obs[j][22 + 5*i : 22 + 5*i + 4]  # lấy 4 chiều đầu thôi
 
-    output = np.delete(output, 4, axis=1)
+    # Nếu target nào chưa được thấy bởi camera nào (4 giá trị đầu vẫn = 0) thì gán thành -1
+    mask = np.all(output[:, :4] == 0, axis=1)
+    output[mask, :4] = -1
+
     return output
 
 def has_unseen_targets(obs, k):
