@@ -6,6 +6,7 @@ import math
 import mate
 from perception import EncodeLinear, FeedForward
 from filter import env_base_filter as eb_f
+import random
 
 class TransformerLayer(nn.Module):
     def __init__(self, embed_dim, num_heads, ff_dim, dropout=0.3):
@@ -145,6 +146,13 @@ class WorldModel(nn.Module):
         env_base = env.reset()
         self.env_base = eb_f.collected_infos(env_base)
 
+        self.current_epoch = 0
+        self.total_epochs = 300
+    
+    def get_teacher_forcing_ratio(self):
+        """Cosine schedule từ 1.0 xuống 0.0"""
+        return 0.5 * (1 + math.cos(math.pi * self.current_epoch / self.total_epochs))
+    
     def get_sinusoidal_pos_encoding(self, seq_len, d_model, device):
         position = torch.arange(seq_len, dtype=torch.float, device=device).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float, device=device) * (-math.log(10000.0) / d_model))
@@ -274,9 +282,21 @@ class WorldModel(nn.Module):
         # Prepare decoder input
         batch_size = targets.shape[0]
         if teacher_forcing and future_targets is not None:
-            # Teacher forcing: Use ground truth future_targets [batch_size, num_targets, future_steps, 2]
-            sos = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features)
-            decoder_input = torch.cat([sos, future_targets[:, :, :-1, :]], dim=2)  # [batch_size, num_targets, future_steps, 2]
+            teacher_forcing_ratio = self.get_teacher_forcing_ratio()
+            if random.random() < teacher_forcing_ratio:
+                # Teacher forcing: Use ground truth future_targets [batch_size, num_targets, future_steps, 2]
+                sos = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features)
+                decoder_input = torch.cat([sos, future_targets[:, :, :-1, :]], dim=2)  # [batch_size, num_targets, future_steps, 2]
+            else:
+                # Inference: Initialize with SOS token
+                decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features)
+                outputs = []
+                for _ in range(self.future_steps):
+                    output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, teacher_forcing=False)
+                    outputs.append(output[:, :, -1:, :])  # Take last timestep
+                    decoder_input = torch.cat([decoder_input, output[:, :, -1:, :]], dim=2)
+                return torch.cat(outputs, dim=2)  # [batch_size, num_targets, future_steps, 2]
+
         else:
             # Inference: Initialize with SOS token
             decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features)
@@ -290,3 +310,7 @@ class WorldModel(nn.Module):
         # Decode
         output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, teacher_forcing)
         return output
+    
+    def set_current_epoch(self, epoch):
+        """Cập nhật epoch hiện tại để tính teacher_forcing_ratio"""
+        self.current_epoch = epoch
