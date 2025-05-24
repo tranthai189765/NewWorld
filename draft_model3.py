@@ -301,6 +301,12 @@ class WorldModel(nn.Module):
         cameras_memory = cameras_memory.view(batch_size * self.num_cameras, -1, self.final_embed_dim)
         env_memory = env_memory.repeat_interleave(num_targets, dim=0)
         obstacles_memory = obstacles_memory.repeat_interleave(num_targets, dim=0)
+        print("tgt_embedded.shape = ", tgt_embedded.shape)
+        print("targets_memory.shape = ", targets_memory.shape)
+        print("cameras_memory.shape = ", cameras_memory.shape)
+        print("env_memory.shape = ", env_memory.shape)
+        print("obstacles_memory.shape = ",  obstacles_memory.shape)
+        print("tgt_mask.shape = ",  tgt_mask.shape)
         for layer in self.decoder_layers:
             tgt_embedded = layer(tgt_embedded, targets_memory, cameras_memory, env_memory, obstacles_memory, tgt_mask)
         output = self.output_head(tgt_embedded)
