@@ -56,19 +56,43 @@ class TransformerDecoderLayer(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
     
-    def forward(self, tgt, tgt_mask=None):
-        self_attn_out, _ = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask)
-        tgt = self.norm1(tgt + self.dropout(self_attn_out))
-        ffn_out = self.ffn(tgt)
-        tgt = self.norm2(tgt + self.dropout(ffn_out))
-        return tgt
+    def forward(self, tgt, targets_memory, cameras_memory, env_memory, obstacles_memory, tgt_mask=None):
+        batch_size = targets_memory.shape[0]
+        num_targets = tgt.shape[0] // batch_size
+        num_cameras = cameras_memory.shape[1]
+        num_env = env_memory.shape[1]
+        num_obstacles = obstacles_memory.shape[1]
+        
+        # Lặp lại memory để khớp với batch_size * num_targets
+        targets_memory = targets_memory.repeat_interleave(num_targets, dim=0)
+        cameras_memory = cameras_memory.repeat_interleave(num_targets, dim=0)
+        env_memory = env_memory.repeat_interleave(num_targets, dim=0)
+        obstacles_memory = obstacles_memory.repeat_interleave(num_targets, dim=0)
+        
+        combined = torch.cat([tgt, targets_memory, cameras_memory, env_memory, obstacles_memory], dim=1)
+        
+        seq_len = tgt.shape[1]
+        total_len = combined.shape[1]
+        if tgt_mask is not None:
+            extended_mask = torch.zeros(seq_len, total_len, device=tgt_mask.device)
+            extended_mask[:, :seq_len] = tgt_mask
+            attn_out, _ = self.self_attn(combined, combined, combined, attn_mask=extended_mask)
+        else:
+            attn_out, _ = self.self_attn(combined, combined, combined)
+        
+        combined = self.norm1(combined + self.dropout(attn_out))
+        ffn_out = self.ffn(combined)
+        combined = self.norm2(combined + self.dropout(ffn_out))
+        
+        tgt_out = combined[:, :tgt.shape[1], :].contiguous()
+        return tgt_out
 
 class WorldModel(nn.Module):
     def __init__(self, init_embed_dim=32, final_embed_dim=128, init_num_heads=2, num_heads=8, 
                  init_ff_dim=64, final_ff_dim=512, num_layers=1, num_decoder_layers=1,
-                 num_timesteps=100, steps_per_segment=5, future_steps=10,
-                 num_targets=4, target_features=8, 
-                 num_cameras=8, camera_features=17, 
+                 num_timesteps=30, steps_per_segment=5, future_steps=11,
+                 num_targets=4, target_features=4, 
+                 num_cameras=8, camera_features=13,
                  num_obstacles=9, obstacle_features=3, dropout=0.3):
         super().__init__()
         self.target_features = target_features
@@ -85,20 +109,17 @@ class WorldModel(nn.Module):
         self.final_embed_dim = final_embed_dim
         self.num_cameras = num_cameras
         self.init_ff_dim = init_ff_dim
-        self.output_features_first = 2  # [x, y] for first timestep
-        self.output_features_rest = 3  # [cos(theta), sin(theta), magnitude] for rest
+        self.output_features = 2  # Only predict [x, y]
 
         # CLS tokens
         self.target_cls_token = nn.Parameter(torch.zeros(1, 1, init_embed_dim))
         self.camera_cls_token = nn.Parameter(torch.zeros(1, 1, init_embed_dim))
-        self.sos_token = nn.Parameter(torch.zeros(1, 1, self.output_features_first))
+        self.sos_token = nn.Parameter(torch.zeros(1, 1, self.output_features))
 
         # Projections
         self.target_projection = nn.Linear(target_features, init_embed_dim)
         self.camera_projection = nn.Linear(camera_features, init_embed_dim)
-        self.obstacle_projection = nn.Linear(obstacle_features, init_embed_dim)
-        self.decoder_input_projection = nn.Linear(self.output_features_rest, final_embed_dim)
-        self.memory_projection = nn.Linear(final_embed_dim, final_embed_dim)
+        self.decoder_input_projection = nn.Linear(self.output_features, final_embed_dim)
 
         # Segment attention
         self.target_segment_attention = nn.MultiheadAttention(init_embed_dim, init_num_heads, batch_first=True)
@@ -128,15 +149,19 @@ class WorldModel(nn.Module):
             TransformerDecoderLayer(final_embed_dim, num_heads, final_ff_dim, dropout) for _ in range(num_decoder_layers)
         ])
 
-        # Output heads
-        self.output_head_first = nn.Linear(final_embed_dim, self.output_features_first)
-        self.output_head_rest = nn.Linear(final_embed_dim, self.output_features_rest)
+        # Output head
+        self.output_head = nn.Sequential( 
+            nn.Linear(final_embed_dim, int(final_embed_dim / 2)),
+            nn.ReLU(inplace=True),
+            nn.Linear(int(final_embed_dim / 2), self.output_features),
+            nn.ReLU(inplace=True)
+        )
 
         # Encoders
         self.encoder_target = EncodeLinear(init_embed_dim, final_embed_dim)
         self.encoder_camera = EncodeLinear(init_embed_dim, final_embed_dim)
-        self.encoder_obstacle = EncodeLinear(init_embed_dim, final_embed_dim)
         self.encode_env = EncodeLinear(12, final_embed_dim)
+        self.encode_obstacle = EncodeLinear(obstacle_features, final_embed_dim)
 
         # Environment
         env = mate.make('MATE-4v8-9-v0')
@@ -148,6 +173,7 @@ class WorldModel(nn.Module):
         self.total_epochs = 300
     
     def get_teacher_forcing_ratio(self):
+        """Cosine schedule từ 1.0 xuống 0.0"""
         return 0.5 * (1 + math.cos(math.pi * self.current_epoch / self.total_epochs))
     
     def get_sinusoidal_pos_encoding(self, seq_len, d_model, device):
@@ -165,7 +191,6 @@ class WorldModel(nn.Module):
     def encode(self, targets, cameras, obstacles):
         batch_size, num_targets, target_flat_dim = targets.shape
         _, num_cameras, camera_flat_dim = cameras.shape
-        _, num_obstacles, obstacle_flat_dim = obstacles.shape
         targets_reshaped = targets.view(batch_size, num_targets, self.num_timesteps, self.target_features)
         cameras_reshaped = cameras.view(batch_size, self.num_cameras, self.num_timesteps, self.camera_features)
 
@@ -175,9 +200,8 @@ class WorldModel(nn.Module):
         new_env_base = torch.tensor(new_env_base, dtype=torch.float32, device=targets.device)
         new_env_base = self.encode_env(new_env_base)
 
-        # Obstacles: Projection
-        obstacles_projected = self.obstacle_projection(obstacles)
-        obstacles_embedded = self.encoder_obstacle(obstacles_projected)
+        # Obstacles
+        obstacles_embedded = self.encode_obstacle(obstacles)
 
         # Targets: Projection
         targets_projected = self.target_projection(targets_reshaped)
@@ -250,129 +274,55 @@ class WorldModel(nn.Module):
         # Encoder layers
         targets_out = targets_embedded
         cameras_out = cameras_embedded
-        env_base_out = new_env_base
         obstacles_out = obstacles_embedded
         for layer in self.encoder_layers:
-            targets_out, cameras_out, env_base_out, obstacles_out = layer(
-                targets_out, cameras_out, env_base_out, obstacles_out
+            targets_out, cameras_out, new_env_base, obstacles_out = layer(
+                targets_out, cameras_out, new_env_base, obstacles_out
             )
         
-        return targets_out, cameras_out, env_base_out, obstacles_out
+        return targets_out, cameras_out, new_env_base, obstacles_out
 
     def decode(self, tgt, targets_memory, cameras_memory, env_memory, obstacles_memory, teacher_forcing=True):
         batch_size, num_targets, seq_len, _ = tgt.shape
-        tgt = tgt.view(batch_size * num_targets, seq_len, -1)
+        tgt = tgt.view(batch_size * num_targets, seq_len, self.output_features)
         tgt_embedded = self.decoder_input_projection(tgt)
-        
-        # Incorporate encoder memory
-        targets_memory = targets_memory.view(batch_size * num_targets, -1, self.final_embed_dim).mean(dim=1)
-        cameras_memory = cameras_memory.repeat_interleave(self.num_targets, dim=0).mean(dim=1)
-        env_memory = env_memory.repeat_interleave(num_targets, dim=0).mean(dim=1)
-        obstacles_memory = obstacles_memory.repeat_interleave(num_targets, dim=0).mean(dim=1)
-        
-        # Combine memories
-        memory = (targets_memory + cameras_memory + env_memory + obstacles_memory) / 4
-        memory = self.memory_projection(memory).unsqueeze(1)  # [batch_size * num_targets, 1, final_embed_dim]
-        tgt_embedded = tgt_embedded + memory
-        
         pos_encoding = self.get_sinusoidal_pos_encoding(seq_len, self.final_embed_dim, tgt.device)
         pos_encoding = pos_encoding.expand(batch_size * num_targets, -1, -1)
         tgt_embedded = tgt_embedded + pos_encoding
         tgt_mask = self.generate_square_subsequent_mask(seq_len).to(tgt.device)
-        
+        # Không reshape cameras_memory, giữ nguyên [batch_size, num_cameras, final_embed_dim]
         for layer in self.decoder_layers:
-            tgt_embedded = layer(tgt_embedded, tgt_mask)
-        
-        outputs = []
-        for t in range(seq_len):
-            if t == 0:
-                output_t = self.output_head_first(tgt_embedded[:, t:t+1, :])  # [batch_size * num_targets, 1, 2]
-                output_t = torch.cat([output_t, torch.zeros(batch_size * num_targets, 1, 1, device=tgt.device)], dim=-1)  # [batch_size * num_targets, 1, 3]
-            else:
-                output_t = self.output_head_rest(tgt_embedded[:, t:t+1, :])  # [batch_size * num_targets, 1, 3]
-                direction = output_t[:, :, :2]
-                direction = direction / (torch.norm(direction, dim=-1, keepdim=True) + 1e-8)
-                magnitude = output_t[:, :, 2:3].clamp(min=0)
-                output_t = torch.cat([direction, magnitude], dim=-1)  # [batch_size * num_targets, 1, 3]
-            outputs.append(output_t)
-        output = torch.cat(outputs, dim=1)  # [batch_size * num_targets, seq_len, 3]
-        output = output.view(batch_size, num_targets, seq_len, 3)
+            tgt_embedded = layer(tgt_embedded, targets_memory, cameras_memory, env_memory, obstacles_memory, tgt_mask)
+        output = self.output_head(tgt_embedded)
+        output = output.view(batch_size, num_targets, seq_len, self.output_features)
         return output
-
-    def vector_to_position(self, prev_pos, direction, magnitude):
-        direction = direction / (torch.norm(direction, dim=-1, keepdim=True) + 1e-8)
-        displacement = direction * magnitude
-        new_pos = prev_pos + displacement
-        return new_pos
 
     def forward(self, targets, cameras, obstacles, future_targets=None, teacher_forcing=True):
         targets_out, cameras_out, embedded_env_base, obstacles_out = self.encode(targets, cameras, obstacles)
         batch_size = targets.shape[0]
-    
         if teacher_forcing and future_targets is not None:
             teacher_forcing_ratio = self.get_teacher_forcing_ratio()
             if random.random() < teacher_forcing_ratio:
-                # Teacher forcing mode
-                decoder_input = torch.zeros(batch_size, self.num_targets, self.future_steps, 3, device=targets.device)
-                decoder_input[:, :, 0, :2] = future_targets[:, :, 0, :2]
-                for t in range(1, self.future_steps):
-                    delta = future_targets[:, :, t, :2] - future_targets[:, :, t-1, :2]
-                    magnitude = torch.norm(delta, dim=-1, keepdim=True)
-                    direction = delta / (magnitude + 1e-8)
-                    decoder_input[:, :, t, :2] = direction
-                    decoder_input[:, :, t, 2:3] = magnitude
-                sos = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
-                sos = torch.cat([sos, torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=3)
-                decoder_input = torch.cat([sos, decoder_input[:, :, :-1, :]], dim=2)
-                output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=True)
-                return output
+                sos = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features)
+                decoder_input = torch.cat([sos, future_targets[:, :, :-1, :]], dim=2)
             else:
-                # Non-teacher forcing mode during training
-                decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
-                decoder_input = torch.cat([decoder_input, torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=3)
+                decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features)
                 outputs = []
-                for t in range(self.future_steps):
-                    output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=True)
-                    output_t = output[:, :, -1:, :]  # [batch_size, num_targets, 1, 3]
-                    outputs.append(output_t)
-                    next_input = output_t
-                    decoder_input = torch.cat([decoder_input, next_input], dim=2)
-                output = torch.cat(outputs, dim=2)  # [batch_size, num_targets, future_steps, 3]
-                return output
+                for _ in range(self.future_steps):
+                    output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=False)
+                    outputs.append(output[:, :, -1:, :])
+                    decoder_input = torch.cat([decoder_input, output[:, :, -1:, :]], dim=2)
+                return torch.cat(outputs, dim=2)
         else:
-            # Inference mode
-            decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
-            decoder_input = torch.cat([decoder_input, torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=3)
+            decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features)
             outputs = []
-            prev_pos = None
-            for t in range(self.future_steps):
+            for _ in range(self.future_steps):
                 output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=False)
-                output_t = output[:, :, -1:, :]  # [batch_size, num_targets, 1, 3]
-                if t == 0:
-                    outputs.append(output_t[:, :, :, :2])  # [batch_size, num_targets, 1, 2]
-                    prev_pos = output_t[:, :, -1, :2]
-                    next_input = output_t  # Keep [x, y, 0] for consistency
-                else:
-                    direction = output_t[:, :, :, :2]
-                    magnitude = output_t[:, :, :, 2:3]
-                    new_pos = self.vector_to_position(prev_pos, direction.squeeze(2), magnitude.squeeze(2))
-                    outputs.append(new_pos.unsqueeze(2))  # [batch_size, num_targets, 1, 2]
-                    next_input = output_t  # Use [direction, magnitude]
-                    prev_pos = new_pos
-                decoder_input = torch.cat([decoder_input, next_input], dim=2)
-            return torch.cat(outputs, dim=2)  # [batch_size, num_targets, future_steps, 2]
-
+                outputs.append(output[:, :, -1:, :])
+                decoder_input = torch.cat([decoder_input, output[:, :, -1:, :]], dim=2)
+            return torch.cat(outputs, dim=2)
+        output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing)
+        return output
+    
     def set_current_epoch(self, epoch):
         self.current_epoch = epoch
-
-def prepare_training_labels(coordinates):
-    batch_size, num_targets, future_steps, _ = coordinates.shape
-    labels = torch.zeros(batch_size, num_targets, future_steps, 3, device=coordinates.device)
-    labels[:, :, 0, :2] = coordinates[:, :, 0, :]
-    for t in range(1, future_steps):
-        delta = coordinates[:, :, t, :] - coordinates[:, :, t-1, :]
-        magnitude = torch.norm(delta, dim=-1, keepdim=True)
-        direction = delta / (magnitude + 1e-8)
-        labels[:, :, t, :2] = direction
-        labels[:, :, t, 2:3] = magnitude
-    return labels
