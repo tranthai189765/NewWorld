@@ -287,7 +287,6 @@ class WorldModel(nn.Module):
         for t in range(seq_len):
             if t == 0:
                 output_t = self.output_head_first(tgt_embedded[:, t:t+1, :])  # [batch_size * num_targets, 1, 2]
-                # Pad with zero for magnitude to match output_features_rest
                 output_t = torch.cat([output_t, torch.zeros(batch_size * num_targets, 1, 1, device=tgt.device)], dim=-1)  # [batch_size * num_targets, 1, 3]
             else:
                 output_t = self.output_head_rest(tgt_embedded[:, t:t+1, :])  # [batch_size * num_targets, 1, 3]
@@ -313,6 +312,7 @@ class WorldModel(nn.Module):
         if teacher_forcing and future_targets is not None:
             teacher_forcing_ratio = self.get_teacher_forcing_ratio()
             if random.random() < teacher_forcing_ratio:
+                # Teacher forcing mode
                 decoder_input = torch.zeros(batch_size, self.num_targets, self.future_steps, 3, device=targets.device)
                 decoder_input[:, :, 0, :2] = future_targets[:, :, 0, :2]
                 for t in range(1, self.future_steps):
@@ -324,29 +324,23 @@ class WorldModel(nn.Module):
                 sos = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
                 sos = torch.cat([sos, torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=3)
                 decoder_input = torch.cat([sos, decoder_input[:, :, :-1, :]], dim=2)
+                output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=True)
+                return output
             else:
+                # Non-teacher forcing mode during training
                 decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
+                decoder_input = torch.cat([decoder_input, torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=3)
                 outputs = []
-                prev_pos = None
                 for t in range(self.future_steps):
-                    if decoder_input.shape[-1] == 2:
-                        decoder_input = torch.cat([decoder_input, torch.zeros_like(decoder_input[..., :1])], dim=-1)
-                    output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=False)
-                    if t == 0:
-                        outputs.append(output[:, :, -1:, :2])
-                        prev_pos = output[:, :, -1, :2]
-                        next_input = torch.cat([output[:, :, -1:, :2], torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=-1)
-                        decoder_input = torch.cat([decoder_input, next_input], dim=2)
-                    else:
-                        direction = output[:, :, -1, :2]
-                        magnitude = output[:, :, -1, 2:3]
-                        new_pos = self.vector_to_position(prev_pos, direction, magnitude)
-                        outputs.append(new_pos.unsqueeze(2))
-                        next_input = torch.cat([direction, magnitude], dim=-1).unsqueeze(2)
-                        decoder_input = torch.cat([decoder_input, next_input], dim=2)
-                        prev_pos = new_pos
-                return torch.cat(outputs, dim=2)
+                    output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=True)
+                    output_t = output[:, :, -1:, :]  # [batch_size, num_targets, 1, 3]
+                    outputs.append(output_t)
+                    next_input = output_t
+                    decoder_input = torch.cat([decoder_input, next_input], dim=2)
+                output = torch.cat(outputs, dim=2)  # [batch_size, num_targets, future_steps, 3]
+                return output
         else:
+            # Inference mode
             decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
             outputs = []
             prev_pos = None
@@ -367,11 +361,8 @@ class WorldModel(nn.Module):
                     next_input = torch.cat([direction, magnitude], dim=-1).unsqueeze(2)
                     decoder_input = torch.cat([decoder_input, next_input], dim=2)
                     prev_pos = new_pos
-            return torch.cat(outputs, dim=2)
+            return torch.cat(outputs, dim=2)  # [batch_size, num_targets, future_steps, 2]
 
-        output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing)
-        return output
-    
     def set_current_epoch(self, epoch):
         self.current_epoch = epoch
 
