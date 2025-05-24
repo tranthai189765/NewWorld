@@ -42,10 +42,10 @@ class TransformerLayer(nn.Module):
         combined = self.norm2(combined + self.dropout(ffn_out))
         
         # Split back into individual components
-        targets_out = combined[:, :num_targets, :]
-        cameras_out = combined[:, num_targets:num_targets+num_cameras, :]
-        env_base_out = combined[:, num_targets+num_cameras:num_targets+num_cameras+num_env, :]
-        obstacles_out = combined[:, num_targets+num_cameras+num_env:, :]
+        targets_out = combined[:, :num_targets, :].contiguous()
+        cameras_out = combined[:, num_targets:num_targets+num_cameras, :].contiguous()
+        env_base_out = combined[:, num_targets+num_cameras:num_targets+num_cameras+num_env, :].contiguous()
+        obstacles_out = combined[:, num_targets+num_cameras+num_env:, :].contiguous()
         
         return targets_out, cameras_out, env_base_out, obstacles_out
 
