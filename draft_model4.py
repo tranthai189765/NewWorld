@@ -23,25 +23,18 @@ class TransformerLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
     
     def forward(self, targets, cameras, env_base, obstacles):
-        # Concatenate all inputs into a single sequence
         batch_size = targets.shape[0]
         num_targets = targets.shape[1]
         num_cameras = cameras.shape[1]
         num_env = env_base.shape[1]
         num_obstacles = obstacles.shape[1]
         
-        # Combine all objects: [batch_size, num_targets + num_cameras + num_env + num_obstacles, embed_dim]
         combined = torch.cat([targets, cameras, env_base, obstacles], dim=1)
-        
-        # Self-attention on combined sequence
         attn_out, _ = self.self_attn(combined, combined, combined)
         combined = self.norm1(combined + self.dropout(attn_out))
-        
-        # Feed-forward network
         ffn_out = self.ffn(combined)
         combined = self.norm2(combined + self.dropout(ffn_out))
         
-        # Split back into individual components
         targets_out = combined[:, :num_targets, :].contiguous()
         cameras_out = combined[:, num_targets:num_targets+num_cameras, :].contiguous()
         env_base_out = combined[:, num_targets+num_cameras:num_targets+num_cameras+num_env, :].contiguous()
@@ -53,15 +46,8 @@ class TransformerDecoderLayer(nn.Module):
     def __init__(self, embed_dim, num_heads, ff_dim, dropout=0.3):
         super().__init__()
         self.self_attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
-        self.cross_attn_targets = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
-        self.cross_attn_cameras = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
-        self.cross_attn_env = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
-        self.cross_attn_obstacles = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
-        self.norm3 = nn.LayerNorm(embed_dim)
-        self.norm4 = nn.LayerNorm(embed_dim)
-        self.norm5 = nn.LayerNorm(embed_dim)
         self.ffn = nn.Sequential(
             nn.Linear(embed_dim, ff_dim),
             nn.ReLU(),
@@ -70,19 +56,11 @@ class TransformerDecoderLayer(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
     
-    def forward(self, tgt, targets_memory, cameras_memory, env_memory, obstacles_memory, tgt_mask=None):
+    def forward(self, tgt, tgt_mask=None):
         self_attn_out, _ = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask)
         tgt = self.norm1(tgt + self.dropout(self_attn_out))
-        cross_targets_out, _ = self.cross_attn_targets(tgt, targets_memory, targets_memory)
-        tgt = self.norm2(tgt + self.dropout(cross_targets_out))
-        cross_cameras_out, _ = self.cross_attn_cameras(tgt, cameras_memory, cameras_memory)
-        tgt = self.norm3(tgt + self.dropout(cross_cameras_out))
-        cross_env_out, _ = self.cross_attn_env(tgt, env_memory, env_memory)
-        tgt = self.norm4(tgt + self.dropout(cross_env_out))
-        cross_obstacles_out, _ = self.cross_attn_obstacles(tgt, obstacles_memory, obstacles_memory)
-        tgt = self.norm5(tgt + self.dropout(cross_obstacles_out))
         ffn_out = self.ffn(tgt)
-        tgt = self.norm5(tgt + self.dropout(ffn_out))
+        tgt = self.norm2(tgt + self.dropout(ffn_out))
         return tgt
 
 class WorldModel(nn.Module):
@@ -118,7 +96,9 @@ class WorldModel(nn.Module):
         # Projections
         self.target_projection = nn.Linear(target_features, init_embed_dim)
         self.camera_projection = nn.Linear(camera_features, init_embed_dim)
-        self.decoder_input_projection = nn.Linear(max(self.output_features_first, self.output_features_rest), final_embed_dim)
+        self.obstacle_projection = nn.Linear(obstacle_features, init_embed_dim)
+        self.decoder_input_projection = nn.Linear(self.output_features_rest, final_embed_dim)
+        self.memory_projection = nn.Linear(final_embed_dim, final_embed_dim)
 
         # Segment attention
         self.target_segment_attention = nn.MultiheadAttention(init_embed_dim, init_num_heads, batch_first=True)
@@ -149,13 +129,13 @@ class WorldModel(nn.Module):
         ])
 
         # Output heads
-        self.output_head_first = nn.Linear(final_embed_dim, self.output_features_first)  # For t=1
-        self.output_head_rest = nn.Linear(final_embed_dim, self.output_features_rest)   # For t=2 to t=10
+        self.output_head_first = nn.Linear(final_embed_dim, self.output_features_first)
+        self.output_head_rest = nn.Linear(final_embed_dim, self.output_features_rest)
 
         # Encoders
         self.encoder_target = EncodeLinear(init_embed_dim, final_embed_dim)
         self.encoder_camera = EncodeLinear(init_embed_dim, final_embed_dim)
-        self.encoder_obstacle = EncodeLinear(obstacle_features, final_embed_dim)
+        self.encoder_obstacle = EncodeLinear(init_embed_dim, final_embed_dim)
         self.encode_env = EncodeLinear(12, final_embed_dim)
 
         # Environment
@@ -168,7 +148,6 @@ class WorldModel(nn.Module):
         self.total_epochs = 300
     
     def get_teacher_forcing_ratio(self):
-        """Cosine schedule from 1.0 to 0.0"""
         return 0.5 * (1 + math.cos(math.pi * self.current_epoch / self.total_epochs))
     
     def get_sinusoidal_pos_encoding(self, seq_len, d_model, device):
@@ -197,7 +176,8 @@ class WorldModel(nn.Module):
         new_env_base = self.encode_env(new_env_base)
 
         # Obstacles: Projection
-        obstacles_embedded = self.encoder_obstacle(obstacles)  # [batch_size, num_obstacles, final_embed_dim]
+        obstacles_projected = self.obstacle_projection(obstacles)
+        obstacles_embedded = self.encoder_obstacle(obstacles_projected)
 
         # Targets: Projection
         targets_projected = self.target_projection(targets_reshaped)
@@ -207,7 +187,7 @@ class WorldModel(nn.Module):
         cls_tokens = self.target_cls_token.expand(batch_size, num_targets, self.num_segments, 1, self.init_embed_dim)
         targets_with_cls = torch.cat([cls_tokens, targets_segments], dim=3)
 
-        # Positional encoding for targets (CLS + timesteps)
+        # Positional encoding for targets
         pos_encoding = self.get_sinusoidal_pos_encoding(self.steps_per_segment + 1, self.init_embed_dim, targets.device)
         pos_encoding = pos_encoding.expand(batch_size, num_targets, self.num_segments, -1, -1)
         targets_with_pos = targets_with_cls + pos_encoding
@@ -241,7 +221,7 @@ class WorldModel(nn.Module):
         cls_tokens_cameras = self.camera_cls_token.expand(batch_size, self.num_cameras, self.num_segments, 1, self.init_embed_dim)
         cameras_with_cls = torch.cat([cls_tokens_cameras, cameras_segments], dim=3)
 
-        # Positional encoding for cameras (CLS + timesteps)
+        # Positional encoding for cameras
         pos_encoding_cameras = self.get_sinusoidal_pos_encoding(self.steps_per_segment + 1, self.init_embed_dim, cameras.device)
         pos_encoding_cameras = pos_encoding_cameras.expand(batch_size, self.num_cameras, self.num_segments, -1, -1)
         cameras_with_pos = cameras_with_cls + pos_encoding_cameras
@@ -283,16 +263,25 @@ class WorldModel(nn.Module):
         batch_size, num_targets, seq_len, _ = tgt.shape
         tgt = tgt.view(batch_size * num_targets, seq_len, -1)
         tgt_embedded = self.decoder_input_projection(tgt)
+        
+        # Incorporate encoder memory
+        targets_memory = targets_memory.view(batch_size * num_targets, -1, self.final_embed_dim).mean(dim=1)
+        cameras_memory = cameras_memory.repeat_interleave(self.num_targets, dim=0).mean(dim=1)
+        env_memory = env_memory.repeat_interleave(num_targets, dim=0).mean(dim=1)
+        obstacles_memory = obstacles_memory.repeat_interleave(num_targets, dim=0).mean(dim=1)
+        
+        # Combine memories
+        memory = (targets_memory + cameras_memory + env_memory + obstacles_memory) / 4
+        memory = self.memory_projection(memory).unsqueeze(1)  # [batch_size * num_targets, 1, final_embed_dim]
+        tgt_embedded = tgt_embedded + memory
+        
         pos_encoding = self.get_sinusoidal_pos_encoding(seq_len, self.final_embed_dim, tgt.device)
         pos_encoding = pos_encoding.expand(batch_size * num_targets, -1, -1)
         tgt_embedded = tgt_embedded + pos_encoding
         tgt_mask = self.generate_square_subsequent_mask(seq_len).to(tgt.device)
-        targets_memory = targets_memory.view(batch_size * num_targets, -1, self.final_embed_dim)
-        cameras_memory = cameras_memory.view(batch_size * self.num_cameras, -1, self.final_embed_dim)
-        env_memory = env_memory.repeat_interleave(num_targets, dim=0)
-        obstacles_memory = obstacles_memory.repeat_interleave(num_targets, dim=0)
+        
         for layer in self.decoder_layers:
-            tgt_embedded = layer(tgt_embedded, targets_memory, cameras_memory, env_memory, obstacles_memory, tgt_mask)
+            tgt_embedded = layer(tgt_embedded, tgt_mask)
         
         outputs = []
         for t in range(seq_len):
@@ -310,7 +299,6 @@ class WorldModel(nn.Module):
         return output
 
     def vector_to_position(self, prev_pos, direction, magnitude):
-        """Convert direction vector and magnitude to new position"""
         direction = direction / (torch.norm(direction, dim=-1, keepdim=True) + 1e-8)
         displacement = direction * magnitude
         new_pos = prev_pos + displacement
@@ -323,26 +311,22 @@ class WorldModel(nn.Module):
         if teacher_forcing and future_targets is not None:
             teacher_forcing_ratio = self.get_teacher_forcing_ratio()
             if random.random() < teacher_forcing_ratio:
-                # Prepare teacher forcing input
                 decoder_input = torch.zeros(batch_size, self.num_targets, self.future_steps, 3, device=targets.device)
-                decoder_input[:, :, 0, :2] = future_targets[:, :, 0, :2]  # First timestep: [x, y]
+                decoder_input[:, :, 0, :2] = future_targets[:, :, 0, :2]
                 for t in range(1, self.future_steps):
                     delta = future_targets[:, :, t, :2] - future_targets[:, :, t-1, :2]
                     magnitude = torch.norm(delta, dim=-1, keepdim=True)
                     direction = delta / (magnitude + 1e-8)
                     decoder_input[:, :, t, :2] = direction
                     decoder_input[:, :, t, 2:3] = magnitude
-                # Pad sos token to match feature dimension (3)
                 sos = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
                 sos = torch.cat([sos, torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=3)
                 decoder_input = torch.cat([sos, decoder_input[:, :, :-1, :]], dim=2)
             else:
-                # Inference mode
                 decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
                 outputs = []
                 prev_pos = None
                 for t in range(self.future_steps):
-                    # Pad decoder_input to 3 features if needed
                     if decoder_input.shape[-1] == 2:
                         decoder_input = torch.cat([decoder_input, torch.zeros_like(decoder_input[..., :1])], dim=-1)
                     output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=False)
@@ -361,12 +345,10 @@ class WorldModel(nn.Module):
                         prev_pos = new_pos
                 return torch.cat(outputs, dim=2)
         else:
-            # Inference mode
             decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
             outputs = []
             prev_pos = None
             for t in range(self.future_steps):
-                # Pad decoder_input to 3 features if needed
                 if decoder_input.shape[-1] == 2:
                     decoder_input = torch.cat([decoder_input, torch.zeros_like(decoder_input[..., :1])], dim=-1)
                 output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=False)
