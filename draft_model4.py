@@ -67,8 +67,8 @@ class WorldModel(nn.Module):
     def __init__(self, init_embed_dim=32, final_embed_dim=128, init_num_heads=2, num_heads=8, 
                  init_ff_dim=64, final_ff_dim=512, num_layers=1, num_decoder_layers=1,
                  num_timesteps=100, steps_per_segment=5, future_steps=10,
-                 num_targets=8, target_features=8, 
-                 num_cameras=4, camera_features=17, 
+                 num_targets=4, target_features=8, 
+                 num_cameras=8, camera_features=17, 
                  num_obstacles=9, obstacle_features=3, dropout=0.3):
         super().__init__()
         self.target_features = target_features
@@ -286,16 +286,18 @@ class WorldModel(nn.Module):
         outputs = []
         for t in range(seq_len):
             if t == 0:
-                output_t = self.output_head_first(tgt_embedded[:, t:t+1, :])
+                output_t = self.output_head_first(tgt_embedded[:, t:t+1, :])  # [batch_size * num_targets, 1, 2]
+                # Pad with zero for magnitude to match output_features_rest
+                output_t = torch.cat([output_t, torch.zeros(batch_size * num_targets, 1, 1, device=tgt.device)], dim=-1)  # [batch_size * num_targets, 1, 3]
             else:
-                output_t = self.output_head_rest(tgt_embedded[:, t:t+1, :])
+                output_t = self.output_head_rest(tgt_embedded[:, t:t+1, :])  # [batch_size * num_targets, 1, 3]
                 direction = output_t[:, :, :2]
                 direction = direction / (torch.norm(direction, dim=-1, keepdim=True) + 1e-8)
                 magnitude = output_t[:, :, 2:3].clamp(min=0)
-                output_t = torch.cat([direction, magnitude], dim=-1)
+                output_t = torch.cat([direction, magnitude], dim=-1)  # [batch_size * num_targets, 1, 3]
             outputs.append(output_t)
-        output = torch.cat(outputs, dim=1)
-        output = output.view(batch_size, num_targets, seq_len, -1)
+        output = torch.cat(outputs, dim=1)  # [batch_size * num_targets, seq_len, 3]
+        output = output.view(batch_size, num_targets, seq_len, 3)
         return output
 
     def vector_to_position(self, prev_pos, direction, magnitude):
