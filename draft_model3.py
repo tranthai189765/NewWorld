@@ -157,9 +157,9 @@ class WorldModel(nn.Module):
 
         # Output head
         self.output_head = nn.Sequential( 
-            nn.Linear(final_embed_dim, final_embed_dim/2),
+            nn.Linear(final_embed_dim, int(final_embed_dim / 2)),
             nn.ReLU(inplace=True),
-            nn.Linear(final_embed_dim/2, self.output_features),
+            nn.Linear(int(final_embed_dim / 2), self.output_features),
             nn.ReLU(inplace=True)
         )
 
