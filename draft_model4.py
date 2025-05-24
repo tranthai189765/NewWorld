@@ -197,7 +197,8 @@ class WorldModel(nn.Module):
         new_env_base = self.encode_env(new_env_base)
 
         # Obstacles: Projection
-        obstacles_embedded = self.encoder_obstacle(obstacles)  # [batch_size, num_obstacles, final_embed_dim]
+        obstacles_projected = self.obstacle_projection(obstacles)
+        obstacles_embedded = self.encoder_obstacle(obstacles_projected)
 
         # Targets: Projection
         targets_projected = self.target_projection(targets_reshaped)
@@ -207,7 +208,7 @@ class WorldModel(nn.Module):
         cls_tokens = self.target_cls_token.expand(batch_size, num_targets, self.num_segments, 1, self.init_embed_dim)
         targets_with_cls = torch.cat([cls_tokens, targets_segments], dim=3)
 
-        # Positional encoding for targets (CLS + timesteps)
+        # Positional encoding for targets
         pos_encoding = self.get_sinusoidal_pos_encoding(self.steps_per_segment + 1, self.init_embed_dim, targets.device)
         pos_encoding = pos_encoding.expand(batch_size, num_targets, self.num_segments, -1, -1)
         targets_with_pos = targets_with_cls + pos_encoding
@@ -241,7 +242,7 @@ class WorldModel(nn.Module):
         cls_tokens_cameras = self.camera_cls_token.expand(batch_size, self.num_cameras, self.num_segments, 1, self.init_embed_dim)
         cameras_with_cls = torch.cat([cls_tokens_cameras, cameras_segments], dim=3)
 
-        # Positional encoding for cameras (CLS + timesteps)
+        # Positional encoding for cameras
         pos_encoding_cameras = self.get_sinusoidal_pos_encoding(self.steps_per_segment + 1, self.init_embed_dim, cameras.device)
         pos_encoding_cameras = pos_encoding_cameras.expand(batch_size, self.num_cameras, self.num_segments, -1, -1)
         cameras_with_pos = cameras_with_cls + pos_encoding_cameras
@@ -294,7 +295,6 @@ class WorldModel(nn.Module):
         for layer in self.decoder_layers:
             tgt_embedded = layer(tgt_embedded, targets_memory, cameras_memory, env_memory, obstacles_memory, tgt_mask)
         
-        # Apply different output heads based on timestep
         outputs = []
         for t in range(seq_len):
             if t == 0:
@@ -318,7 +318,6 @@ class WorldModel(nn.Module):
         return new_pos
 
     def forward(self, targets, cameras, obstacles, future_targets=None, teacher_forcing=True):
-        # Encode
         targets_out, cameras_out, embedded_env_base, obstacles_out = self.encode(targets, cameras, obstacles)
         batch_size = targets.shape[0]
 
@@ -334,7 +333,9 @@ class WorldModel(nn.Module):
                     direction = delta / (magnitude + 1e-8)
                     decoder_input[:, :, t, :2] = direction
                     decoder_input[:, :, t, 2:3] = magnitude
+                # Pad sos token to match feature dimension (3)
                 sos = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
+                sos = torch.cat([sos, torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=3)
                 decoder_input = torch.cat([sos, decoder_input[:, :, :-1, :]], dim=2)
             else:
                 # Inference mode
@@ -342,11 +343,15 @@ class WorldModel(nn.Module):
                 outputs = []
                 prev_pos = None
                 for t in range(self.future_steps):
+                    # Pad decoder_input to 3 features if needed
+                    if decoder_input.shape[-1] == 2:
+                        decoder_input = torch.cat([decoder_input, torch.zeros_like(decoder_input[..., :1])], dim=-1)
                     output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=False)
                     if t == 0:
                         outputs.append(output[:, :, -1:, :2])
                         prev_pos = output[:, :, -1, :2]
-                        decoder_input = torch.cat([decoder_input, output[:, :, -1:, :]], dim=2)
+                        next_input = torch.cat([output[:, :, -1:, :2], torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=-1)
+                        decoder_input = torch.cat([decoder_input, next_input], dim=2)
                     else:
                         direction = output[:, :, -1, :2]
                         magnitude = output[:, :, -1, 2:3]
@@ -356,18 +361,21 @@ class WorldModel(nn.Module):
                         decoder_input = torch.cat([decoder_input, next_input], dim=2)
                         prev_pos = new_pos
                 return torch.cat(outputs, dim=2)
-
         else:
             # Inference mode
             decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
             outputs = []
             prev_pos = None
             for t in range(self.future_steps):
+                # Pad decoder_input to 3 features if needed
+                if decoder_input.shape[-1] == 2:
+                    decoder_input = torch.cat([decoder_input, torch.zeros_like(decoder_input[..., :1])], dim=-1)
                 output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=False)
                 if t == 0:
                     outputs.append(output[:, :, -1:, :2])
                     prev_pos = output[:, :, -1, :2]
-                    decoder_input = torch.cat([decoder_input, output[:, :, -1:, :]], dim=2)
+                    next_input = torch.cat([output[:, :, -1:, :2], torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=-1)
+                    decoder_input = torch.cat([decoder_input, next_input], dim=2)
                 else:
                     direction = output[:, :, -1, :2]
                     magnitude = output[:, :, -1, 2:3]
@@ -378,7 +386,6 @@ class WorldModel(nn.Module):
                     prev_pos = new_pos
             return torch.cat(outputs, dim=2)
 
-        # Decode
         output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing)
         return output
     
@@ -386,27 +393,13 @@ class WorldModel(nn.Module):
         self.current_epoch = epoch
 
 def prepare_training_labels(coordinates):
-    """
-    Convert ground truth coordinates to training labels.
-    Args:
-        coordinates: Tensor of shape [batch_size, num_targets, future_steps, 2]
-                     containing [x, y] coordinates for each timestep.
-    Returns:
-        labels: Tensor of shape [batch_size, num_targets, future_steps, 3]
-                where t=0 has [x, y, 0], and t=1 to t=9 have [cos(theta), sin(theta), magnitude].
-    """
     batch_size, num_targets, future_steps, _ = coordinates.shape
     labels = torch.zeros(batch_size, num_targets, future_steps, 3, device=coordinates.device)
-    
-    # First timestep: [x, y, 0]
     labels[:, :, 0, :2] = coordinates[:, :, 0, :]
-    
-    # Subsequent timesteps: [cos(theta), sin(theta), magnitude]
     for t in range(1, future_steps):
         delta = coordinates[:, :, t, :] - coordinates[:, :, t-1, :]
         magnitude = torch.norm(delta, dim=-1, keepdim=True)
         direction = delta / (magnitude + 1e-8)
         labels[:, :, t, :2] = direction
         labels[:, :, t, 2:3] = magnitude
-    
     return labels
