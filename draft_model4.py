@@ -197,8 +197,7 @@ class WorldModel(nn.Module):
         new_env_base = self.encode_env(new_env_base)
 
         # Obstacles: Projection
-        obstacles_projected = self.obstacle_projection(obstacles)
-        obstacles_embedded = self.encoder_obstacle(obstacles_projected)
+        obstacles_embedded = self.encoder_obstacle(obstacles)  # [batch_size, num_obstacles, final_embed_dim]
 
         # Targets: Projection
         targets_projected = self.target_projection(targets_reshaped)
@@ -208,7 +207,7 @@ class WorldModel(nn.Module):
         cls_tokens = self.target_cls_token.expand(batch_size, num_targets, self.num_segments, 1, self.init_embed_dim)
         targets_with_cls = torch.cat([cls_tokens, targets_segments], dim=3)
 
-        # Positional encoding for targets
+        # Positional encoding for targets (CLS + timesteps)
         pos_encoding = self.get_sinusoidal_pos_encoding(self.steps_per_segment + 1, self.init_embed_dim, targets.device)
         pos_encoding = pos_encoding.expand(batch_size, num_targets, self.num_segments, -1, -1)
         targets_with_pos = targets_with_cls + pos_encoding
@@ -242,7 +241,7 @@ class WorldModel(nn.Module):
         cls_tokens_cameras = self.camera_cls_token.expand(batch_size, self.num_cameras, self.num_segments, 1, self.init_embed_dim)
         cameras_with_cls = torch.cat([cls_tokens_cameras, cameras_segments], dim=3)
 
-        # Positional encoding for cameras
+        # Positional encoding for cameras (CLS + timesteps)
         pos_encoding_cameras = self.get_sinusoidal_pos_encoding(self.steps_per_segment + 1, self.init_embed_dim, cameras.device)
         pos_encoding_cameras = pos_encoding_cameras.expand(batch_size, self.num_cameras, self.num_segments, -1, -1)
         cameras_with_pos = cameras_with_cls + pos_encoding_cameras
