@@ -130,9 +130,9 @@ class WorldModel(nn.Module):
 
         # Layer Normalization
         self.target_segment_norm = nn.LayerNorm(init_embed_dim)
-        self.camera_segment_norm = nn.LayerNorm(embed_dim=init_embed_dim)
-        self.target_cls_norm = nn.LayerNorm(embed_dim=init_embed_dim)
-        self.camera_cls_norm = nn.LayerNorm(embed_dim=init_embed_dim)
+        self.camera_segment_norm = nn.LayerNorm(init_embed_dim)
+        self.target_cls_norm = nn.LayerNorm(init_embed_dim)
+        self.camera_cls_norm = nn.LayerNorm(init_embed_dim)
 
         # Attention pooling
         self.target_pooling = nn.Linear(init_embed_dim, 1)
