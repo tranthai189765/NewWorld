@@ -57,13 +57,12 @@ class TransformerDecoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
     
     def forward(self, tgt, targets_memory, cameras_memory, env_memory, obstacles_memory, tgt_mask=None):
-        batch_size = targets_memory.shape[0]
+        batch_size = tgt.shape[0] // targets_memory.shape[0]
         num_targets = tgt.shape[0] // batch_size
-        num_cameras = cameras_memory.shape[1]
-        num_env = env_memory.shape[1]
-        num_obstacles = obstacles_memory.shape[1]
+        num_cameras = cameras_memory.shape[0] // batch_size
+        num_env = env_memory.shape[0] // batch_size
+        num_obstacles = obstacles_memory.shape[0] // batch_size
         
-        # Lặp lại memory để khớp với batch_size * num_targets
         targets_memory = targets_memory.repeat_interleave(num_targets, dim=0)
         cameras_memory = cameras_memory.repeat_interleave(num_targets, dim=0)
         env_memory = env_memory.repeat_interleave(num_targets, dim=0)
@@ -109,7 +108,7 @@ class WorldModel(nn.Module):
         self.final_embed_dim = final_embed_dim
         self.num_cameras = num_cameras
         self.init_ff_dim = init_ff_dim
-        self.output_features = 2  # Only predict [x, y]
+        self.output_features = 2  # [x, y] for decoder_input
 
         # CLS tokens
         self.target_cls_token = nn.Parameter(torch.zeros(1, 1, init_embed_dim))
@@ -149,12 +148,17 @@ class WorldModel(nn.Module):
             TransformerDecoderLayer(final_embed_dim, num_heads, final_ff_dim, dropout) for _ in range(num_decoder_layers)
         ])
 
-        # Output head
-        self.output_head = nn.Sequential( 
+        # Output heads
+        self.output_head = nn.Sequential(  # For [x, y] at timestep 0
             nn.Linear(final_embed_dim, int(final_embed_dim / 2)),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
+            nn.Linear(int(final_embed_dim / 2), self.output_features)
+        )
+        self.output_head_dir_mag = nn.Sequential(  # For [direction, magnitude] at timestep 1+
+            nn.Linear(final_embed_dim, int(final_embed_dim / 2)),
+            nn.ReLU(),
             nn.Linear(int(final_embed_dim / 2), self.output_features),
-            nn.ReLU(inplace=True)
+            nn.Sigmoid()  # direction: [0, 1], magnitude: [0, 1]
         )
 
         # Encoders
@@ -187,6 +191,30 @@ class WorldModel(nn.Module):
     def generate_square_subsequent_mask(self, sz):
         mask = torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
         return mask
+
+    def dir_mag_to_xy(self, dir_mag, prev_xy):
+        """Chuyển [direction, magnitude] thành [x, y] dựa trên tọa độ trước đó"""
+        direction = dir_mag[:, :, :, 0] * 2 * math.pi  # [0, 1] -> [0, 2pi]
+        magnitude = dir_mag[:, :, :, 1]  # [0, 1]
+        delta_x = magnitude * torch.cos(direction)
+        delta_y = magnitude * torch.sin(direction)
+        x = prev_xy[:, :, :, 0] + delta_x
+        y = prev_xy[:, :, :, 1] + delta_y
+        return torch.stack([x, y], dim=-1)
+
+    def xy_to_dir_mag(self, xy):
+        """Chuyển chuỗi [x, y] thành [direction, magnitude]"""
+        delta_x = xy[:, :, 1:, 0] - xy[:, :, :-1, 0]  # [batch_size, num_targets, future_steps-1]
+        delta_y = xy[:, :, 1:, 1] - xy[:, :, :-1, 1]
+        magnitude = torch.sqrt(delta_x**2 + delta_y**2)
+        direction = (torch.atan2(delta_y, delta_x) / (2 * math.pi)) % 1  # [0, 1]
+        
+        # Tạo đầu ra [batch_size, num_targets, future_steps, 2]
+        dir_mag = torch.zeros_like(xy)
+        dir_mag[:, :, 0, :] = xy[:, :, 0, :]  # Timestep 0: [x, y]
+        dir_mag[:, :, 1:, 0] = direction
+        dir_mag[:, :, 1:, 1] = magnitude
+        return dir_mag
 
     def encode(self, targets, cameras, obstacles):
         batch_size, num_targets, target_flat_dim = targets.shape
@@ -290,39 +318,85 @@ class WorldModel(nn.Module):
         pos_encoding = pos_encoding.expand(batch_size * num_targets, -1, -1)
         tgt_embedded = tgt_embedded + pos_encoding
         tgt_mask = self.generate_square_subsequent_mask(seq_len).to(tgt.device)
-        # Không reshape cameras_memory, giữ nguyên [batch_size, num_cameras, final_embed_dim]
+
         for layer in self.decoder_layers:
             tgt_embedded = layer(tgt_embedded, targets_memory, cameras_memory, env_memory, obstacles_memory, tgt_mask)
-        output = self.output_head(tgt_embedded)
-        output = output.view(batch_size, num_targets, seq_len, self.output_features)
-        return output
+
+        # Dự đoán đầu ra
+        coords = []
+        dir_mags = []
+        for t in range(seq_len):
+            if t == 0:
+                output = self.output_head(tgt_embedded[:, t:t+1, :])  # [batch_size * num_targets, 1, 2]
+                coords.append(output.view(batch_size, num_targets, 1, 2))
+                dir_mags.append(output.view(batch_size, num_targets, 1, 2))  # [x, y] tại t=0
+            else:
+                output = self.output_head_dir_mag(tgt_embedded[:, t:t+1, :])  # [batch_size * num_targets, 1, 2]
+                output = output.view(batch_size, num_targets, 1, 2)
+                dir_mags.append(output)  # [direction, magnitude]
+                # Chuyển thành [x, y]
+                prev_xy = coords[-1]
+                xy = self.dir_mag_to_xy(output, prev_xy)
+                coords.append(xy)
+        
+        coords = torch.cat(coords, dim=2)  # [batch_size, num_targets, seq_len, 2]
+        dir_mags = torch.cat(dir_mags, dim=2)  # [batch_size, num_targets, seq_len, 2]
+        return coords, dir_mags
 
     def forward(self, targets, cameras, obstacles, future_targets=None, teacher_forcing=True):
+        # Encode
         targets_out, cameras_out, embedded_env_base, obstacles_out = self.encode(targets, cameras, obstacles)
+
+        # Prepare decoder input
         batch_size = targets.shape[0]
         if teacher_forcing and future_targets is not None:
             teacher_forcing_ratio = self.get_teacher_forcing_ratio()
             if random.random() < teacher_forcing_ratio:
+                # Teacher forcing: Sử dụng future_targets [batch_size, num_targets, future_steps, 2] ([x, y])
                 sos = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features)
                 decoder_input = torch.cat([sos, future_targets[:, :, :-1, :]], dim=2)
+                coords, dir_mags = self.decode(decoder_input, targets_out, cameras_out, 
+                                             embedded_env_base, obstacles_out, teacher_forcing)
+                # Chuyển coords thành dir_mags nếu future_targets là [x, y]
+                dir_mags = self.xy_to_dir_mag(coords)
+                return coords, dir_mags
             else:
+                # Non-teacher forcing trong training
                 decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features)
-                outputs = []
-                for _ in range(self.future_steps):
-                    output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=False)
-                    outputs.append(output[:, :, -1:, :])
-                    decoder_input = torch.cat([decoder_input, output[:, :, -1:, :]], dim=2)
-                return torch.cat(outputs, dim=2)
+                coords = []
+                dir_mags = []
+                prev_xy = decoder_input
+                for t in range(self.future_steps):
+                    coord_t, dir_mag_t = self.decode(decoder_input, targets_out, cameras_out, 
+                                                   embedded_env_base, obstacles_out, teacher_forcing=False)
+                    coords.append(coord_t[:, :, -1:, :])
+                    dir_mags.append(dir_mag_t[:, :, -1:, :])
+                    if t == 0:
+                        next_xy = coord_t[:, :, -1:, :]
+                    else:
+                        next_xy = self.dir_mag_to_xy(dir_mag_t[:, :, -1:, :], prev_xy)
+                    decoder_input = torch.cat([decoder_input, next_xy], dim=2)
+                    prev_xy = next_xy
+                return torch.cat(coords, dim=2), torch.cat(dir_mags, dim=2)
         else:
+            # Inference mode
             decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features)
-            outputs = []
-            for _ in range(self.future_steps):
-                output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=False)
-                outputs.append(output[:, :, -1:, :])
-                decoder_input = torch.cat([decoder_input, output[:, :, -1:, :]], dim=2)
-            return torch.cat(outputs, dim=2)
-        output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing)
-        return output
+            coords = []
+            dir_mags = []
+            prev_xy = decoder_input
+            for t in range(self.future_steps):
+                coord_t, dir_mag_t = self.decode(decoder_input, targets_out, cameras_out, 
+                                               embedded_env_base, obstacles_out, teacher_forcing=False)
+                coords.append(coord_t[:, :, -1:, :])
+                dir_mags.append(dir_mag_t[:, :, -1:, :])
+                if t == 0:
+                    next_xy = coord_t[:, :, -1:, :]
+                else:
+                    next_xy = self.dir_mag_to_xy(dir_mag_t[:, :, -1:, :], prev_xy)
+                decoder_input = torch.cat([decoder_input, next_xy], dim=2)
+                prev_xy = next_xy
+            return torch.cat(coords, dim=2), torch.cat(dir_mags, dim=2)
     
     def set_current_epoch(self, epoch):
+        """Cập nhật epoch hiện tại để tính teacher_forcing_ratio"""
         self.current_epoch = epoch
