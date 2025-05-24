@@ -308,7 +308,7 @@ class WorldModel(nn.Module):
     def forward(self, targets, cameras, obstacles, future_targets=None, teacher_forcing=True):
         targets_out, cameras_out, embedded_env_base, obstacles_out = self.encode(targets, cameras, obstacles)
         batch_size = targets.shape[0]
-
+    
         if teacher_forcing and future_targets is not None:
             teacher_forcing_ratio = self.get_teacher_forcing_ratio()
             if random.random() < teacher_forcing_ratio:
@@ -342,25 +342,24 @@ class WorldModel(nn.Module):
         else:
             # Inference mode
             decoder_input = self.sos_token.expand(batch_size, self.num_targets, 1, self.output_features_first)
+            decoder_input = torch.cat([decoder_input, torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=3)
             outputs = []
             prev_pos = None
             for t in range(self.future_steps):
-                if decoder_input.shape[-1] == 2:
-                    decoder_input = torch.cat([decoder_input, torch.zeros_like(decoder_input[..., :1])], dim=-1)
                 output = self.decode(decoder_input, targets_out, cameras_out, embedded_env_base, obstacles_out, teacher_forcing=False)
+                output_t = output[:, :, -1:, :]  # [batch_size, num_targets, 1, 3]
                 if t == 0:
-                    outputs.append(output[:, :, -1:, :2])
-                    prev_pos = output[:, :, -1, :2]
-                    next_input = torch.cat([output[:, :, -1:, :2], torch.zeros(batch_size, self.num_targets, 1, 1, device=targets.device)], dim=-1)
-                    decoder_input = torch.cat([decoder_input, next_input], dim=2)
+                    outputs.append(output_t[:, :, :, :2])  # [batch_size, num_targets, 1, 2]
+                    prev_pos = output_t[:, :, -1, :2]
+                    next_input = output_t  # Keep [x, y, 0] for consistency
                 else:
-                    direction = output[:, :, -1, :2]
-                    magnitude = output[:, :, -1, 2:3]
-                    new_pos = self.vector_to_position(prev_pos, direction, magnitude)
-                    outputs.append(new_pos.unsqueeze(2))
-                    next_input = torch.cat([direction, magnitude], dim=-1).unsqueeze(2)
-                    decoder_input = torch.cat([decoder_input, next_input], dim=2)
+                    direction = output_t[:, :, :, :2]
+                    magnitude = output_t[:, :, :, 2:3]
+                    new_pos = self.vector_to_position(prev_pos, direction.squeeze(2), magnitude.squeeze(2))
+                    outputs.append(new_pos.unsqueeze(2))  # [batch_size, num_targets, 1, 2]
+                    next_input = output_t  # Use [direction, magnitude]
                     prev_pos = new_pos
+                decoder_input = torch.cat([decoder_input, next_input], dim=2)
             return torch.cat(outputs, dim=2)  # [batch_size, num_targets, future_steps, 2]
 
     def set_current_epoch(self, epoch):
