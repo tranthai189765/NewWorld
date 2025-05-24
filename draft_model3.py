@@ -74,8 +74,11 @@ class TransformerDecoderLayer(nn.Module):
         seq_len = tgt.shape[1]
         total_len = combined.shape[1]
         if tgt_mask is not None:
-            extended_mask = torch.zeros(seq_len, total_len, device=tgt_mask.device)
-            extended_mask[:, :seq_len] = tgt_mask
+            # Tạo extended_mask với kích thước [total_len, total_len]
+            extended_mask = torch.zeros(total_len, total_len, device=tgt_mask.device)
+            # Gán tgt_mask vào phần [0:seq_len, 0:seq_len]
+            extended_mask[:seq_len, :seq_len] = tgt_mask
+            # Các phần còn lại để 0 (cho phép attention tự do)
             attn_out, _ = self.self_attn(combined, combined, combined, attn_mask=extended_mask)
         else:
             attn_out, _ = self.self_attn(combined, combined, combined)
@@ -290,7 +293,6 @@ class WorldModel(nn.Module):
         pos_encoding = pos_encoding.expand(batch_size * num_targets, -1, -1)
         tgt_embedded = tgt_embedded + pos_encoding
         tgt_mask = self.generate_square_subsequent_mask(seq_len).to(tgt.device)
-        # Không reshape cameras_memory, giữ nguyên [batch_size, num_cameras, final_embed_dim]
         for layer in self.decoder_layers:
             tgt_embedded = layer(tgt_embedded, targets_memory, cameras_memory, env_memory, obstacles_memory, tgt_mask)
         output = self.output_head(tgt_embedded)
