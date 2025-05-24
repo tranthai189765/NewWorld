@@ -67,8 +67,8 @@ class WorldModel(nn.Module):
     def __init__(self, init_embed_dim=32, final_embed_dim=128, init_num_heads=2, num_heads=8, 
                  init_ff_dim=64, final_ff_dim=512, num_layers=1, num_decoder_layers=1,
                  num_timesteps=100, steps_per_segment=5, future_steps=10,
-                 num_targets=4, target_features=8, 
-                 num_cameras=8, camera_features=17, 
+                 num_targets=8, target_features=8, 
+                 num_cameras=4, camera_features=17, 
                  num_obstacles=9, obstacle_features=3, dropout=0.3):
         super().__init__()
         self.target_features = target_features
