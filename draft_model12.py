@@ -10,13 +10,13 @@ from filter import env_base_filter as eb_f
 class TransformerLayer(nn.Module):
     def __init__(self, embed_dim, num_heads, ff_dim, dropout=0.01):
         super().__init__()
-        # self.cross_attn_targets = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
-        self.self_attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+        self.cross_attn_targets = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+        # self.self_attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         self.cross_attn_cameras = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         self.cross_attn_env = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         self.norm0 = nn.LayerNorm(embed_dim)
-        self.norm1 = nn.LayerNorm(embed_dim)
-        ## elf.norm2 = nn.LayerNorm(embed_dim)
+        # self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
         self.norm3 = nn.LayerNorm(embed_dim)
         self.norm4 = nn.LayerNorm(embed_dim)
         self.ffn = nn.Sequential(
@@ -30,10 +30,10 @@ class TransformerLayer(nn.Module):
     def forward(self, targets, cameras, env_base):
         cross_targets_out, _ = self.cross_attn_targets(cameras, targets, targets)
         cameras = self.norm0(cameras + self.dropout(cross_targets_out))
-        self_attn_out, _ = self.self_attn(targets, targets, targets)
-        targets = self.norm1(targets + self.dropout(self_attn_out))
-        # cross_cameras_out, _ = self.cross_attn_cameras(targets, cameras, cameras)
-        # targets = self.norm2(targets + self.dropout(self_attn_out))
+        # self_attn_out, _ = self.self_attn(targets, targets, targets)
+        # targets = self.norm1(targets + self.dropout(self_attn_out))
+        cross_cameras_out, _ = self.cross_attn_cameras(targets, cameras, cameras)
+        targets = self.norm2(targets + self.dropout(cross_cameras_out))
         cross_env_out, _ = self.cross_attn_env(targets, env_base, env_base)
         targets = self.norm3(targets + self.dropout(cross_env_out))
         ffn_out = self.ffn(targets)
@@ -41,11 +41,11 @@ class TransformerLayer(nn.Module):
         return targets, cameras
 
 class WorldModel(nn.Module):
-    def __init__(self, init_embed_dim=32, final_embed_dim=128, init_num_heads=2, num_heads=8, 
-                 init_ff_dim=64, final_ff_dim=512, num_layers=1, 
-                 num_timesteps=30, steps_per_segment=5, 
-                 num_targets=4, target_features=4, 
-                 num_cameras=4, camera_features=13, dropout=0.3):
+    def __init__(self, init_embed_dim=64, final_embed_dim=256, init_num_heads=2, num_heads=8, 
+                 init_ff_dim=64, final_ff_dim=512, num_layers=3, 
+                 num_timesteps=100, steps_per_segment=5, 
+                 num_targets=8, target_features=8, 
+                 num_cameras=4, camera_features=17, dropout=0.3):
         super().__init__()
         self.target_features = target_features
         self.camera_features = camera_features
