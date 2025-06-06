@@ -28,7 +28,7 @@ class EncodeLinear(nn.Module):
         
 class SuperEncodeLinear(nn.Module):
     def __init__(self, dim_in, dim_out=32, head_name='lstm', device=None):
-        super(EncodeLinear, self).__init__()
+        super(SuperEncodeLinear, self).__init__()
 
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
