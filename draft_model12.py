@@ -15,10 +15,10 @@ class TransformerLayer(nn.Module):
         self.cross_attn_cameras = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         self.cross_attn_env = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         self.norm0 = nn.LayerNorm(embed_dim)
-        # self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
         self.norm3 = nn.LayerNorm(embed_dim)
         self.norm4 = nn.LayerNorm(embed_dim)
+        self.norm5 = nn.LayerNorm(embed_dim)
         self.ffn = nn.Sequential(
             nn.Linear(embed_dim, ff_dim),
             nn.ReLU(),
@@ -27,18 +27,16 @@ class TransformerLayer(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
     
-    def forward(self, targets, cameras, env_base):
-        cross_targets_out, _ = self.cross_attn_targets(cameras, targets, targets)
-        cameras = self.norm0(cameras + self.dropout(cross_targets_out))
-        # self_attn_out, _ = self.self_attn(targets, targets, targets)
-        # targets = self.norm1(targets + self.dropout(self_attn_out))
+    def forward(self, targets, cameras, obstacles, env_base):
         cross_cameras_out, _ = self.cross_attn_cameras(targets, cameras, cameras)
         targets = self.norm2(targets + self.dropout(cross_cameras_out))
         cross_env_out, _ = self.cross_attn_env(targets, env_base, env_base)
         targets = self.norm3(targets + self.dropout(cross_env_out))
+        cross_obs_out, _ = self.cross_attn_env(targets, obstacles, obstacles)
+        targets = self.norm5(targets + self.dropout(cross_obs_out))
         ffn_out = self.ffn(targets)
         targets = self.norm4(targets + self.dropout(ffn_out))
-        return targets, cameras
+        return targets
 
 class WorldModel(nn.Module):
     def __init__(self, init_embed_dim=64, final_embed_dim=256, init_num_heads=2, num_heads=8, 
@@ -202,11 +200,11 @@ class WorldModel(nn.Module):
         cameras_embedded = self.encoder_camera(cameras_final)
 
         # Obstacles and Env
-        # obstacles_embedded = self.encoder_obstacle(obstacles)
+        obstacles_embedded = self.encoder_obstacle(obstacles)
         targets_out = targets_embedded
         cameras_out = cameras_embedded
         for layer in self.layers:
-            targets_out, cameras_out = layer(targets_out, cameras_out, new_env_base)
+            targets_out = layer(targets_out, cameras_out, obstacles_embedded, new_env_base)
         
         # Prediction
         targets_out = self.prediction_norm(targets_out)
@@ -215,3 +213,43 @@ class WorldModel(nn.Module):
         future_states_one_hot = F.one_hot(predicted_labels, num_classes=5).float()
 
         return future_states, future_states_one_hot
+
+
+batch_size = 19
+num_cameras = 4
+num_targets = 8
+camera_dim = 1700
+target_dim = 800
+obstacle_dim = 3
+num_obstacles = 9
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Random dummy data
+cameras = torch.randn(batch_size, num_cameras, camera_dim).to(device)
+obstacles = torch.randn(batch_size, num_obstacles, obstacle_dim).to(device)
+targets = torch.randn(batch_size, num_targets, target_dim).to(device)
+
+# Config lấy ở đây nhé a
+model = WorldModel(
+    init_embed_dim=64, 
+    final_embed_dim=256, 
+    init_num_heads=2, 
+    num_heads=8, 
+    init_ff_dim=64, 
+    final_ff_dim=512, 
+    num_layers=3,
+    num_timesteps=100, 
+    steps_per_segment=5, 
+    num_targets=8, 
+    target_features=8, 
+    num_cameras=4, 
+    camera_features=17, 
+    dropout=0.3
+).to(device)
+
+# Run forward pass
+with torch.no_grad():
+    output, output_one_hot = model(targets, obstacles, cameras)
+
+# Output shape
+print("Output shape (future_states):", output.shape)             # Expected: [19, 8, 5]
+print("Output shape (one-hot):", output_one_hot.shape)          # Expected: [19, 8, 5]
