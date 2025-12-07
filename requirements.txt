@@ -36,7 +36,6 @@ pyglet==1.5.16
 pyparsing==3.1.4
 python-dateutil==2.9.0.post0
 PyWavelets==1.4.1
-PyYAML==5.1
 scikit-image==0.21.0
 scipy==1.10.1
 six==1.17.0
